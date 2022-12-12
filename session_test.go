@@ -75,12 +75,37 @@ func TestSessionPingPong(t *testing.T) {
 	}
 
 	for _, message := range messages {
-		dataMsg, err := message.sender.Send([]byte(message.plaintext))
+
+		b, err := message.sender.MarshalBinary()
+		if err != nil {
+			t.Fatal(err)
+		}
+		copySender := Session{
+			VerifyPeer: message.sender.VerifyPeer,
+		}
+		err = copySender.UnmarshalBinary(b)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		isEstablished, isClosed, plaintext, err := message.receiver.Receive(dataMsg)
+		dataMsg, err := copySender.Send([]byte(message.plaintext))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		b, err = message.receiver.MarshalBinary()
+		if err != nil {
+			t.Fatal(err)
+		}
+		copyReceiver := Session{
+			VerifyPeer: message.receiver.VerifyPeer,
+		}
+		err = copyReceiver.UnmarshalBinary(b)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		isEstablished, isClosed, plaintext, err := copyReceiver.Receive(dataMsg)
 		if err != nil {
 			t.Fatal(err)
 		} else if isEstablished || isClosed {

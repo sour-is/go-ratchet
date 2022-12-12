@@ -20,18 +20,17 @@
 // Ed25519 keys to their X25519 equivalent, as described in RFC 7748[2] or this
 // nice blog post by Filippo Valsorda[3]. This breaks compatibility!
 //
-// 	[0] https://signal.org/docs/specifications/x3dh/
-// 	[1] https://signal.org/docs/specifications/xeddsa/
-// 	[2] https://tools.ietf.org/html/rfc7748#section-4.1
-// 	[3] https://blog.filippo.io/using-ed25519-keys-for-encryption/
+//	[0] https://signal.org/docs/specifications/x3dh/
+//	[1] https://signal.org/docs/specifications/xeddsa/
+//	[2] https://tools.ietf.org/html/rfc7748#section-4.1
+//	[3] https://blog.filippo.io/using-ed25519-keys-for-encryption/
 //
 // The normal procedure is:
 //
-// 	1. Bob creates a signed prekey (SPK) and publishes it; CreateNewSpk.
-// 	2. Alice fetches Bob's SPK including the signature and crafts an initial
-// 	   message; CreateInitialMessage.
-// 	3. Bob receives this message and calculates the same session parameters.
-//
+//  1. Bob creates a signed prekey (SPK) and publishes it; CreateNewSpk.
+//  2. Alice fetches Bob's SPK including the signature and crafts an initial
+//     message; CreateInitialMessage.
+//  3. Bob receives this message and calculates the same session parameters.
 package x3dh
 
 import (

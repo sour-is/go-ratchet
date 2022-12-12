@@ -5,8 +5,10 @@
 package xochimilco
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/gob"
 	"fmt"
 
 	"github.com/oxzi/xochimilco/doubleratchet"
@@ -49,6 +51,47 @@ type Session struct {
 
 	// doubleRatchet is the internal Double Ratchet.
 	doubleRatchet *doubleratchet.DoubleRatchet
+}
+
+func (sess *Session) MarshalBinary() ([]byte, error) {
+	dr, err := sess.doubleRatchet.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+	o := struct {
+		IdentityKey  []byte
+		SpkPub       []byte
+		SpkPriv      []byte
+		DoubleRachet []byte
+	}{
+		sess.IdentityKey,
+		sess.spkPub,
+		sess.spkPriv,
+		dr,
+	}
+	var buf bytes.Buffer
+	err = gob.NewEncoder(&buf).Encode(o)
+	return buf.Bytes(), err
+}
+func (sess *Session) UnmarshalBinary(b []byte) error {
+	var o struct {
+		IdentityKey  []byte
+		SpkPub       []byte
+		SpkPriv      []byte
+		DoubleRachet []byte
+	}
+	err := gob.NewDecoder(bytes.NewReader(b)).Decode(&o)
+	if err != nil {
+		return err
+	}
+
+	sess.IdentityKey = o.IdentityKey
+	sess.spkPub = o.SpkPub
+	sess.spkPriv = o.SpkPriv
+	sess.doubleRatchet = &doubleratchet.DoubleRatchet{}
+	err = sess.doubleRatchet.UnmarshalBinary(o.DoubleRachet)
+
+	return err
 }
 
 // Offer to establish an encrypted Session.
