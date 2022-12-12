@@ -11,8 +11,8 @@ import (
 	"encoding/gob"
 	"fmt"
 
-	"github.com/oxzi/xochimilco/doubleratchet"
-	"github.com/oxzi/xochimilco/x3dh"
+	"github.com/sour-is/xochimilco/doubleratchet"
+	"github.com/sour-is/xochimilco/x3dh"
 )
 
 // Session between two parties to exchange encrypted messages.

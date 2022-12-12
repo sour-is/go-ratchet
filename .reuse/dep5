@@ -1,7 +1,7 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: xochimilco
 Upstream-Contact: Alvar Penning <post@0x21.biz>
-Source: https://github.com/oxzi/xochimilco
+Source: https://github.com/sour-is/xochimilco
 
 Files: LICENSE
 Copyright: GNU GPL authors
