@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"github.com/docopt/docopt-go"
 	"github.com/golang-jwt/jwt/v4"
 
+	"github.com/sour-is/xochimilco"
 	"github.com/sour-is/xochimilco/cmd/ratchet/xdg"
 )
 
@@ -23,7 +25,7 @@ usage:
   ratchet [options] [gen|jwt|offer|ack|send|recv|close]
 
 Options:
-  --to <to>        To key
+  --to <to>        To acct name
   --key <key>      From key [default: ` + xdg.Get(xdg.EnvConfigHome, "rachet/$USER.key") + `]
   --from <user>    From acct name [default: $USER@$DOMAIN]
   --data <state>   Session state path [default: ` + xdg.Get(xdg.EnvDataHome, "rachet") + `]
@@ -155,7 +157,31 @@ func run(opts opts) error {
 			return err
 		}
 		fmt.Println(key)
-
+		toKey, err := fetchKey(opts.To)
+		if err != nil {
+			return err
+		}
+		sess := xochimilco.Session{
+			IdentityKey: key,
+			VerifyPeer: func(peer ed25519.PublicKey) (valid bool) {
+				return peer.Equal(toKey)
+			},
+		}
+		offerMsg, err := sess.Offer()
+		if err != nil {
+			return err
+		}
+		fmt.Println(offerMsg)
+		fp, err := os.Create(filepath.Join(opts.Data, dataFile(opts.From, opts.To)))
+		if err != nil {
+			return err
+		}
+		b, err := sess.MarshalBinary()
+		if err != nil {
+			return err
+		}
+		fp.Write(b)
+		fp.Close()
 	case opts.Ack:
 	case opts.Send:
 	case opts.Recv:
@@ -242,4 +268,14 @@ func readKeyfile(keyfile string) (ed25519.PrivateKey, error) {
 
 func ptr[T any](v T) *T {
 	return &v
+}
+
+func fetchKey(to string) (ed25519.PrivateKey, error) {
+	return nil, nil
+}
+
+func dataFile(from, to string) string {
+	h := fnv.New128a()
+	fmt.Fprint(h, from, to)
+	return enc(h.Sum(nil))
 }
