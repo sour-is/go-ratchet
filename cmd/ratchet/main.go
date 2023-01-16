@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
@@ -80,107 +81,119 @@ func run(opts opts) error {
 
 	switch {
 	case opts.Gen:
-		err := mkKeyfile(opts.Key, opts.Force)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintln(os.Stderr, "wrote keyfile to", opts.Key)
 
 	case opts.Offer:
-		key, err := readKeyfile(opts.Key)
+		key, err := readSaltyIdentity(opts.Key)
 		if err != nil {
 			return err
 		}
 
+		fmt.Fprintf(os.Stderr, "from key %x %x\n", key.Public(), key)
 		toKey, err := fetchKey(opts.To)
 		if err != nil {
-			return err
+			return fmt.Errorf("fetching key: %w", err)
 		}
+		fmt.Fprintf(os.Stderr, "to key %x\n", toKey)
 
 		sess := &xochimilco.Session{
 			IdentityKey: key,
-			VerifyPeer: func(peer ed25519.PublicKey) (valid bool) {
-				return peer.Equal(toKey)
-			},
 		}
 
 		offerMsg, err := sess.Offer()
 		if err != nil {
 			return err
 		}
-		fmt.Println(offerMsg)
 
+		fmt.Println(offerMsg)
 		return writeSession(filepath.Join(opts.Data, dataFile(opts.From, opts.To)), sess)
 
 	case opts.Ack:
-		key, err := readKeyfile(opts.Key)
+		key, err := readSaltyIdentity(opts.Key)
 		if err != nil {
-			return err
+			return fmt.Errorf("reading keyfile: %w", err)
 		}
 
 		toKey, err := fetchKey(opts.To)
 		if err != nil {
-			return err
+			return fmt.Errorf("fetching key: %w", err)
 		}
 
 		sess := &xochimilco.Session{
 			IdentityKey: key,
 			VerifyPeer: func(peer ed25519.PublicKey) (valid bool) {
-				return peer.Equal(toKey)
+				// fmt.Fprintf(os.Stderr, "%v eq \n%v\n", peer, toKey)
+				return bytes.Equal(peer, toKey)
 			},
 		}
 
 		offerMsg, err := bufio.NewReader(os.Stdin).ReadString('\n')
 		if err != nil {
-			return err
+			return fmt.Errorf("reading offer from stdin: %w\n", err)
 		}
+		offerMsg = strings.TrimSpace(offerMsg)
+		fmt.Fprintln(os.Stderr, "msg: ", offerMsg)
+
 		ackMsg, err := sess.Acknowledge(string(offerMsg))
 		if err != nil {
-			return err
+			return fmt.Errorf("creating ack: %w", err)
 		}
+
 		fmt.Println(ackMsg)
 		return writeSession(filepath.Join(opts.Data, dataFile(opts.From, opts.To)), sess)
 
 	case opts.Send:
 		toKey, err := fetchKey(opts.To)
 		if err != nil {
-			return err
+			return fmt.Errorf("fetch key: %w", err)
 		}
+
 		sess, err := readSession(filepath.Join(opts.Data, dataFile(opts.From, opts.To)))
+		if err != nil {
+			return fmt.Errorf("read session: %w", err)
+		}
+
 		sess.VerifyPeer = func(peer ed25519.PublicKey) (valid bool) {
 			return peer.Equal(toKey)
 		}
+
 		msg, err := bufio.NewReader(os.Stdin).ReadBytes('\n')
 		if err != nil {
-			return err
+			return fmt.Errorf("read input: %w", err)
 		}
+
 		dataMsg, err := sess.Send(msg)
 		if err != nil {
-			return err
+			return fmt.Errorf("send: %w", err)
 		}
+
 		fmt.Println(dataMsg)
 		return writeSession(filepath.Join(opts.Data, dataFile(opts.From, opts.To)), sess)
 
 	case opts.Recv:
 		toKey, err := fetchKey(opts.To)
 		if err != nil {
-			return err
+			return fmt.Errorf("fetch key: %w", err)
 		}
+
 		sess, err := readSession(filepath.Join(opts.Data, dataFile(opts.From, opts.To)))
 		if err != nil {
-			return err
+			return fmt.Errorf("read session: %w", err)
 		}
 
 		sess.VerifyPeer = func(peer ed25519.PublicKey) (valid bool) {
-			return peer.Equal(toKey)
+			return bytes.Equal(peer, toKey)
 		}
+
 		msg, err := bufio.NewReader(os.Stdin).ReadString('\n')
 		if err != nil {
-			return err
+			return fmt.Errorf("read string: %w", err)
 		}
+		msg = strings.TrimSpace(msg)
+		fmt.Fprintln(os.Stderr, "read:", msg)
+
 		isEstablished, isClosed, dataMsg, err := sess.Receive(msg)
 		if err != nil {
-			return err
+			return fmt.Errorf("session receive: %w", err)
 		}
 		fmt.Println(dataMsg)
 
@@ -192,19 +205,26 @@ func run(opts opts) error {
 		if isEstablished {
 			fmt.Fprintln(os.Stdout, "session established...")
 		}
-		return writeSession(filepath.Join(opts.Data, dataFile(opts.From, opts.To)), sess)
+
+		err = writeSession(filepath.Join(opts.Data, dataFile(opts.From, opts.To)), sess)
+		if err != nil {
+			return fmt.Errorf("write session: %w", err)
+		}
+
+		return nil
 
 	case opts.Close:
 		sess, err := readSession(filepath.Join(opts.Data, dataFile(opts.From, opts.To)))
 		if err != nil {
-			return err
+			return fmt.Errorf("read session: %w", err)
 		}
+
 		closeMsg, err := sess.Close()
 		if err != nil {
-			return err
+			return fmt.Errorf("session close: %w", err)
 		}
-		fmt.Println(closeMsg)
 
+		fmt.Println(closeMsg)
 		fmt.Fprintln(os.Stdout, "closing session...")
 		return os.Remove(filepath.Join(opts.Data, dataFile(opts.From, opts.To)))
 	}
@@ -286,9 +306,32 @@ func readKeyfile(keyfile string) (ed25519.PrivateKey, error) {
 
 	return key, err
 }
+func readSaltyIdentity(keyfile string) (ed25519.PrivateKey, error) {
+	fd, err := os.Stat(keyfile)
+	if err != nil {
+		return nil, err
+	}
 
-func ptr[T any](v T) *T {
-	return &v
+	if fd.Mode()&0066 != 0 {
+		return nil, fmt.Errorf("permissions are too weak")
+	}
+
+	f, err := os.Open(keyfile)
+	if err != nil {
+		return nil, err
+	}
+
+	b, err := io.ReadAll(f)
+	if err != nil {
+		return nil, err
+	}
+
+	addr, err := saltyim.GetIdentity(saltyim.WithIdentityBytes(b))
+	if err != nil {
+		return nil, err
+	}
+
+	return addr.Key().Private(), nil
 }
 
 func fetchKey(to string) (ed25519.PrivateKey, error) {
@@ -307,7 +350,12 @@ func dataFile(from, to string) string {
 }
 
 func writeSession(filename string, sess *xochimilco.Session) error {
-	fp, err := os.Create(filename)
+	err := os.MkdirAll(filepath.Dir(filename), 0700)
+	if err != nil {
+		return err
+	}
+
+	fp, err := os.OpenFile(filename, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		return err
 	}
