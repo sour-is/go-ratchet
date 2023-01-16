@@ -7,14 +7,14 @@ import (
 	"encoding/base64"
 	"fmt"
 	"hash/fnv"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/docopt/docopt-go"
-	"github.com/golang-jwt/jwt/v4"
+	"go.mills.io/saltyim"
 
 	"github.com/sour-is/xochimilco"
 	"github.com/sour-is/xochimilco/cmd/ratchet/xdg"
@@ -51,7 +51,7 @@ type opts struct {
 func main() {
 	o, err := docopt.ParseDoc(usage)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
 
@@ -65,7 +65,7 @@ func main() {
 	}()
 
 	if err := run(opts); err != nil {
-		fmt.Println(err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
@@ -84,108 +84,129 @@ func run(opts opts) error {
 		if err != nil {
 			return err
 		}
-		fmt.Println("wrote keyfile to", opts.Key)
-	case opts.JWT:
-		key, err := readKeyfile(opts.Key)
-		if err != nil {
-			return err
-		}
-		b := []byte(key.Public().(ed25519.PublicKey))
-		// fmt.Println(base64.RawURLEncoding.EncodeToString(key))
-		token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, jwt.MapClaims{
-			"sub":     "acct:me@sour.is",
-			"pub":     enc(b),
-			"aliases": []string{"acct:xuu@sour.is"},
-			"links": []map[string]any{
-				{
-					"rel":    "salty:xuu",
-					"type":   "application/json+salty",
-					"href":   "https://ev.sour.is/inbox/01GAEMKXYJ4857JQP1MJGD61Z5",
-					"titles": map[string]string{"default": "Jon Lundy"},
-					"properties": map[string]*string{
-						"nick":    ptr("xuu"),
-						"display": ptr("Jon Lundy"),
-						"pub":     ptr("kex140fwaena9t0mrgnjeare5zuknmmvl0vc7agqy5yr938vusxfh9ys34vd2p"),
-					},
-				},
-
-				{
-					"rel": "https://txt.sour.is/user/xuu",
-					"properties": map[string]*string{
-						"https://sour.is/rel/redirect": ptr("https://txt.sour.is/.well-known/webfinger?resource=acct%3Axuu%40txt.sour.is"),
-					},
-				},
-
-				{
-					"rel": "http://joinmastodon.org#xuu%40chaos.social",
-					"properties": map[string]*string{
-						"https://sour.is/rel/redirect": ptr("https://chaos.social/.well-known/webfinger?resource=acct%3Axuu%40chaos.social"),
-					},
-				},
-			},
-
-			"exp": time.Now().Add(90 * time.Minute).Unix(),
-			"iat": time.Now().Unix(),
-			"aud": "webfinger",
-			"iss": "sour.is-rachet",
-		})
-		aToken, err := token.SignedString(key)
-		if err != nil {
-			return err
-		}
-
-		fmt.Println("Token: ", aToken)
-
-		token, err = jwt.Parse(
-			aToken,
-			func(t *jwt.Token) (any, error) {
-				return key.Public(), nil
-			},
-			jwt.WithValidMethods([]string{"EdDSA"}),
-			jwt.WithJSONNumber(),
-		)
-		if err != nil {
-			return err
-		}
-
-		fmt.Println("valid: ", token.Valid)
-		fmt.Println("valid: ", token.Claims)
+		fmt.Fprintln(os.Stderr, "wrote keyfile to", opts.Key)
 
 	case opts.Offer:
 		key, err := readKeyfile(opts.Key)
 		if err != nil {
 			return err
 		}
-		fmt.Println(key)
+
 		toKey, err := fetchKey(opts.To)
 		if err != nil {
 			return err
 		}
-		sess := xochimilco.Session{
+
+		sess := &xochimilco.Session{
 			IdentityKey: key,
 			VerifyPeer: func(peer ed25519.PublicKey) (valid bool) {
 				return peer.Equal(toKey)
 			},
 		}
+
 		offerMsg, err := sess.Offer()
 		if err != nil {
 			return err
 		}
 		fmt.Println(offerMsg)
-		fp, err := os.Create(filepath.Join(opts.Data, dataFile(opts.From, opts.To)))
-		if err != nil {
-			return err
-		}
-		b, err := sess.MarshalBinary()
-		if err != nil {
-			return err
-		}
-		fp.Write(b)
-		fp.Close()
+
+		return writeSession(filepath.Join(opts.Data, dataFile(opts.From, opts.To)), sess)
+
 	case opts.Ack:
+		key, err := readKeyfile(opts.Key)
+		if err != nil {
+			return err
+		}
+
+		toKey, err := fetchKey(opts.To)
+		if err != nil {
+			return err
+		}
+
+		sess := &xochimilco.Session{
+			IdentityKey: key,
+			VerifyPeer: func(peer ed25519.PublicKey) (valid bool) {
+				return peer.Equal(toKey)
+			},
+		}
+
+		offerMsg, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		if err != nil {
+			return err
+		}
+		ackMsg, err := sess.Acknowledge(string(offerMsg))
+		if err != nil {
+			return err
+		}
+		fmt.Println(ackMsg)
+		return writeSession(filepath.Join(opts.Data, dataFile(opts.From, opts.To)), sess)
+
 	case opts.Send:
+		toKey, err := fetchKey(opts.To)
+		if err != nil {
+			return err
+		}
+		sess, err := readSession(filepath.Join(opts.Data, dataFile(opts.From, opts.To)))
+		sess.VerifyPeer = func(peer ed25519.PublicKey) (valid bool) {
+			return peer.Equal(toKey)
+		}
+		msg, err := bufio.NewReader(os.Stdin).ReadBytes('\n')
+		if err != nil {
+			return err
+		}
+		dataMsg, err := sess.Send(msg)
+		if err != nil {
+			return err
+		}
+		fmt.Println(dataMsg)
+		return writeSession(filepath.Join(opts.Data, dataFile(opts.From, opts.To)), sess)
+
 	case opts.Recv:
+		toKey, err := fetchKey(opts.To)
+		if err != nil {
+			return err
+		}
+		sess, err := readSession(filepath.Join(opts.Data, dataFile(opts.From, opts.To)))
+		if err != nil {
+			return err
+		}
+
+		sess.VerifyPeer = func(peer ed25519.PublicKey) (valid bool) {
+			return peer.Equal(toKey)
+		}
+		msg, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		if err != nil {
+			return err
+		}
+		isEstablished, isClosed, dataMsg, err := sess.Receive(msg)
+		if err != nil {
+			return err
+		}
+		fmt.Println(dataMsg)
+
+		if isClosed {
+			fmt.Fprintln(os.Stdout, "closing session...")
+			return os.Remove(filepath.Join(opts.Data, dataFile(opts.From, opts.To)))
+		}
+
+		if isEstablished {
+			fmt.Fprintln(os.Stdout, "session established...")
+		}
+		return writeSession(filepath.Join(opts.Data, dataFile(opts.From, opts.To)), sess)
+
 	case opts.Close:
+		sess, err := readSession(filepath.Join(opts.Data, dataFile(opts.From, opts.To)))
+		if err != nil {
+			return err
+		}
+		closeMsg, err := sess.Close()
+		if err != nil {
+			return err
+		}
+		fmt.Println(closeMsg)
+
+		fmt.Fprintln(os.Stdout, "closing session...")
+		return os.Remove(filepath.Join(opts.Data, dataFile(opts.From, opts.To)))
 	}
 
 	return nil
@@ -271,11 +292,58 @@ func ptr[T any](v T) *T {
 }
 
 func fetchKey(to string) (ed25519.PrivateKey, error) {
-	return nil, nil
+	addr, err := saltyim.LookupAddr(to)
+	if err != nil {
+		return nil, err
+	}
+
+	return addr.Key().Bytes(), nil
 }
 
 func dataFile(from, to string) string {
 	h := fnv.New128a()
 	fmt.Fprint(h, from, to)
 	return enc(h.Sum(nil))
+}
+
+func writeSession(filename string, sess *xochimilco.Session) error {
+	fp, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+
+	b, err := sess.MarshalBinary()
+	if err != nil {
+		return err
+	}
+
+	_, err = fp.Write(b)
+	if err != nil {
+		return err
+	}
+	return fp.Close()
+}
+
+func readSession(filename string) (*xochimilco.Session, error) {
+	fd, err := os.Stat(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	if fd.Mode()&0066 != 0 {
+		return nil, fmt.Errorf("permissions are too weak")
+	}
+
+	f, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	b, err := io.ReadAll(f)
+	if err != nil {
+		return nil, err
+	}
+
+	sess := &xochimilco.Session{}
+	err = sess.UnmarshalBinary(b)
+	return sess, err
 }
