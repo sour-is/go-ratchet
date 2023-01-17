@@ -20,13 +20,18 @@ run:
 	@echo
 	@echo Alice sends message
 	@echo
-	echo hello | go run ./cmd/ratchet send --me $(ALICE)  --them $(BOB) --key $(ALICE_KEY) --data ./tmp | tee send.msg
+	echo hello | go run ./cmd/ratchet send --me $(ALICE)  --them $(BOB) --key $(ALICE_KEY) --data ./tmp | tee send1.msg
 	@echo
-	@echo Bob receives message. sends close
+	@echo Bob receives message. sends reply
 	@echo
-	cat send.msg | go run ./cmd/ratchet recv --me $(BOB)  --them $(ALICE) --key $(BOB_KEY) --data ./tmp 
-	go run ./cmd/ratchet close --me $(BOB)  --them $(ALICE) --key $(BOB_KEY) --data ./tmp | tee close.msg
+	cat send1.msg | go run ./cmd/ratchet recv --me $(BOB)  --them $(ALICE) --key $(BOB_KEY) --data ./tmp 
+	echo yoyo | go run ./cmd/ratchet send --me $(BOB)  --them $(ALICE) --key $(BOB_KEY) --data ./tmp | tee send2.msg
 	@echo
-	@echo Alice receives close.
+	@echo Alice receives message. sends close
+	@echo
+	cat send2.msg | go run ./cmd/ratchet recv --me $(ALICE)  --them $(BOB) --key $(ALICE_KEY) --data ./tmp 	
+	go run ./cmd/ratchet close --me $(ALICE)  --them $(BOB) --key $(ALICE_KEY) --data ./tmp | tee close.msg
+	@echo
+	@echo Bob receives close.
 	@echo
 	cat close.msg | go run ./cmd/ratchet recv --me $(BOB)  --them $(ALICE) --key $(BOB_KEY) --data ./tmp 

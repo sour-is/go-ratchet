@@ -123,7 +123,6 @@ func run(opts opts) error {
 		sess := &xochimilco.Session{
 			IdentityKey: key,
 			VerifyPeer: func(peer ed25519.PublicKey) (valid bool) {
-				fmt.Fprintf(os.Stderr, "%v eq \n%v\n", peer, themKey)
 				return bytes.Equal(peer, themKey)
 			},
 		}
@@ -195,7 +194,7 @@ func run(opts opts) error {
 		}
 
 		fmt.Println(dataMsg)
-		return writeSession(filepath.Join(opts.Data, dataFile(opts.Them, opts.Me)), sess)
+		return writeSession(filepath.Join(opts.Data, dataFile(opts.Me, opts.Them)), sess)
 
 	case opts.Recv:
 
@@ -234,7 +233,6 @@ func run(opts opts) error {
 		if err != nil {
 			return fmt.Errorf("session receive: %w", err)
 		}
-		fmt.Println(dataMsg)
 
 		if isClosed {
 			fmt.Fprintln(os.Stdout, "closing session...")
@@ -244,6 +242,8 @@ func run(opts opts) error {
 		if isEstablished {
 			fmt.Fprintln(os.Stdout, "session established...")
 		}
+
+		fmt.Println("GOT: ", string(dataMsg))
 
 		err = writeSession(filepath.Join(opts.Data, dataFile(opts.Me, opts.Them)), sess)
 		if err != nil {
