@@ -33,6 +33,7 @@ require (
 	github.com/likexian/doh-go v0.6.4 // indirect
 	github.com/likexian/gokit v0.25.6 // indirect
 	github.com/logrusorgru/aurora v2.0.3+incompatible // indirect
+	github.com/matryer/is v1.4.0
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
 	github.com/oklog/ulid v1.3.1 // indirect
 	github.com/oklog/ulid/v2 v2.0.2 // indirect

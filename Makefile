@@ -1,0 +1,32 @@
+ALICE=alice@sour.is
+ALICE_KEY=alice.key
+
+BOB=bob@sour.is
+BOB_KEY=bob.key
+
+run:
+	rm -rf ./tmp
+	@echo Alice starts by offering Bob to upgrade the connection.
+	@echo
+	go run ./cmd/ratchet offer --me $(ALICE) --them $(BOB) --key $(ALICE_KEY) --data ./tmp | tee offer.msg
+	@echo
+	@echo "Bob acknowledges Alice's offer."
+	@echo
+	cat offer.msg | go run ./cmd/ratchet ack --me $(BOB) --them $(ALICE) --key $(BOB_KEY) --data ./tmp | tee ack.msg
+	@echo
+	@echo "Alice evaluates Bob's acknowledgement."
+	@echo
+	cat ack.msg | go run ./cmd/ratchet recv --me $(ALICE) --them $(BOB) --key $(ALICE_KEY) --data ./tmp 
+	@echo
+	@echo Alice sends message
+	@echo
+	echo hello | go run ./cmd/ratchet send --me $(ALICE)  --them $(BOB) --key $(ALICE_KEY) --data ./tmp | tee send.msg
+	@echo
+	@echo Bob receives message. sends close
+	@echo
+	cat send.msg | go run ./cmd/ratchet recv --me $(BOB)  --them $(ALICE) --key $(BOB_KEY) --data ./tmp 
+	go run ./cmd/ratchet close --me $(BOB)  --them $(ALICE) --key $(BOB_KEY) --data ./tmp | tee close.msg
+	@echo
+	@echo Alice receives close.
+	@echo
+	cat close.msg | go run ./cmd/ratchet recv --me $(BOB)  --them $(ALICE) --key $(BOB_KEY) --data ./tmp 

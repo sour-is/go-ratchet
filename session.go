@@ -56,7 +56,7 @@ type Session struct {
 func (sess *Session) MarshalBinary() ([]byte, error) {
 	var err error
 	var dr []byte
-	
+
 	if sess.doubleRatchet != nil {
 		dr, err = sess.doubleRatchet.MarshalBinary()
 		if err != nil {
@@ -93,9 +93,10 @@ func (sess *Session) UnmarshalBinary(b []byte) error {
 	sess.IdentityKey = o.IdentityKey
 	sess.spkPub = o.SpkPub
 	sess.spkPriv = o.SpkPriv
-	sess.doubleRatchet = &doubleratchet.DoubleRatchet{}
-	err = sess.doubleRatchet.UnmarshalBinary(o.DoubleRachet)
-
+	if len(o.DoubleRachet) > 0 {
+		sess.doubleRatchet = &doubleratchet.DoubleRatchet{}
+		err = sess.doubleRatchet.UnmarshalBinary(o.DoubleRachet)
+	}
 	return err
 }
 
