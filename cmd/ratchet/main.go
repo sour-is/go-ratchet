@@ -24,13 +24,13 @@ import (
 
 var usage = `Rachet Chat.
 usage:
-  ratchet [options] [offer|recv|send|close]
+  ratchet [options] [offer|recv|send|close|chat]
 
 Options:
   --me <me>        My acct name
   --key <key>      From key [default: ` + xdg.Get(xdg.EnvConfigHome, "rachet/$USER.key") + `]
   --them <them>    Their acct name [default: $USER@$DOMAIN]
-  --state <state>   Session state path [default: ` + xdg.Get(xdg.EnvDataHome, "rachet") + `]
+  --state <state>  Session state path [default: ` + xdg.Get(xdg.EnvDataHome, "rachet") + `]
   --msg <msg>      Msg to read in. [default: stdin]
 `
 
@@ -39,6 +39,7 @@ type opts struct {
 	Send  bool `docopt:"send"`
 	Recv  bool `docopt:"recv"`
 	Close bool `docopt:"close"`
+	Chat  bool `docopt:"chat"`
 
 	Me    string `docopt:"--me"`
 	Key   string `docopt:"--key"`
@@ -128,22 +129,18 @@ func main() {
 }
 
 func run(opts opts) error {
-	// logf("%#v\n", opts)
-
-	os.Setenv("DOMAIN", "sour.is")
-
-	key, err := readSaltyIdentity(opts.Key)
-	if err != nil {
-		return fmt.Errorf("reading keyfile: %w", err)
-	}
-
-	sm := NewSessionManager(opts.State, opts.Me, key)
-
 	switch {
 	// case opts.Gen:
 	// todo?
 
 	case opts.Offer:
+		key, err := readSaltyIdentity(opts.Key)
+		if err != nil {
+			return fmt.Errorf("reading keyfile: %w", err)
+		}
+
+		sm := NewSessionManager(opts.State, opts.Me, key)
+
 		sess, err := sm.Get(opts.Them)
 		if err != nil {
 			return fmt.Errorf("read session: %w", err)
@@ -154,10 +151,12 @@ func run(opts opts) error {
 			return err
 		}
 
-		fmt.Println(opts.Me, offerMsg)
+		fmt.Println("ratchet", opts.Me, offerMsg)
 		return sm.Put(sess)
 
 	case opts.Send:
+		sm := NewSessionManager(opts.State, opts.Me, nil)
+
 		input, them, err := readInput(opts.Msg, opts.Them)
 		if err != nil {
 			return fmt.Errorf("reading input: %w", err)
@@ -173,10 +172,17 @@ func run(opts opts) error {
 			return fmt.Errorf("send: %w", err)
 		}
 
-		fmt.Println(opts.Me, msg)
+		fmt.Println("ratchet", opts.Me, msg)
 		return sm.Put(sess)
 
 	case opts.Recv:
+		key, err := readSaltyIdentity(opts.Key)
+		if err != nil {
+			return fmt.Errorf("reading keyfile: %w", err)
+		}
+
+		sm := NewSessionManager(opts.State, opts.Me, key)
+
 		input, them, err := readInput(opts.Msg, opts.Them)
 		if err != nil {
 			return fmt.Errorf("reading input from %s: %w", them, err)
@@ -199,7 +205,7 @@ func run(opts opts) error {
 		case isEstablished:
 			log("GOT: session established with ", them, "...")
 			if len(msg) > 0 {
-				fmt.Println(opts.Me, string(msg))
+				fmt.Println("ratchet", opts.Me, string(msg))
 			}
 
 		default:
@@ -209,6 +215,8 @@ func run(opts opts) error {
 		return sm.Put(sess)
 
 	case opts.Close:
+		sm := NewSessionManager(opts.State, opts.Me, nil)
+
 		sess, err := sm.Get(opts.Them)
 		if err != nil {
 			return fmt.Errorf("read session: %w", err)
@@ -219,8 +227,13 @@ func run(opts opts) error {
 			return fmt.Errorf("session close: %w", err)
 		}
 
-		fmt.Println(opts.Me, msg)
+		fmt.Println("ratchet", opts.Me, msg)
 		return sm.Delete(sess)
+
+	case opts.Chat:
+
+	default:
+		log(usage)
 	}
 
 	return nil
@@ -293,7 +306,7 @@ func readInput(input string, them string) (msg string, name string, err error) {
 		err = fmt.Errorf("reading offer from stdin: %w", err)
 		return
 	}
-	// log("msg: ", msg)
+	msg = strings.TrimPrefix(msg, "ratchet ")
 
 	name = them
 	if n, m, ok := strings.Cut(msg, " "); ok {
