@@ -137,7 +137,12 @@ func (sess *Session) Acknowledge(offerMsg string) (ackMsg string, err error) {
 		return
 	}
 	offer := offerIf.(*offerMessage)
+	_, ackMsg, err = sess.receiveOffer(offer)
 
+	return
+}
+
+func (sess *Session) receiveOffer(offer *offerMessage) (isEstablished bool, ackMsg string, err error) {
 	if !sess.VerifyPeer(offer.idKey) {
 		err = fmt.Errorf("verification function refuses public key")
 		return
@@ -164,13 +169,15 @@ func (sess *Session) Acknowledge(offerMsg string) (ackMsg string, err error) {
 		return
 	}
 
+	isEstablished = true
 	ack := ackMessage{
 		idKey:  sess.IdentityKey.Public().(ed25519.PublicKey),
 		eKey:   ekPub,
 		cipher: initialCiphertext,
 	}
 	ackMsg, err = marshalMessage(sessAck, ack)
-	return
+
+	return 
 }
 
 // receiveAck deals with incoming sessAck messages.
@@ -240,6 +247,11 @@ func (sess *Session) Receive(msg string) (isEstablished, isClosed bool, plaintex
 	}
 
 	switch msgType {
+	case sessOffer:
+		var txt string
+		isEstablished, txt, err = sess.receiveOffer(msgIf.(*offerMessage))
+		plaintext = []byte(txt)
+
 	case sessAck:
 		isEstablished, err = sess.receiveAck(msgIf.(*ackMessage))
 

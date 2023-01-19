@@ -4,7 +4,6 @@ go 1.19
 
 require (
 	github.com/docopt/docopt-go v0.0.0-20180111231733-ee0de3bc6815
-	github.com/golang-jwt/jwt/v4 v4.4.3
 	go.mills.io/saltyim v0.0.0-20230114024822-96d8afcbef49
 	golang.org/x/crypto v0.0.0-20220321153916-2c7772ba3064
 )
