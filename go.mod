@@ -9,7 +9,7 @@ require (
 )
 
 require (
-	git.mills.io/prologic/msgbus v0.1.19 // indirect
+	git.mills.io/prologic/msgbus v0.1.19
 	github.com/ScaleFT/sshkeys v0.0.0-20200327173127-6142f742bca5 // indirect
 	github.com/andybalholm/brotli v1.0.4 // indirect
 	github.com/avast/retry-go v2.7.0+incompatible // indirect

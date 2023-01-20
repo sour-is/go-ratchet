@@ -5,21 +5,40 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "make offer",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "./cmd/ratchet",
+            "args":["offer", "--me", "alice@sour.is", "--them", "bob@sour.is", "--key", "../../alice.key", "--state", "../../tmp"]
+        }, 
+
+        {
+            "name": "receive offer",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "./cmd/ratchet",
+            "args":["recv", "--them", "alice@sour.is", "--me", "bob@sour.is", "--key", "../../bob.key", "--state", "../../tmp", "--msg", "../../offer.msg"]
+        },
+
+ 
+        {
             "name": "receive ack",
             "type": "go",
             "request": "launch",
             "mode": "auto",
             "program": "./cmd/ratchet",
-            "args":["recv", "--me", "alice@sour.is", "--them", "bob@sour.is", "--key", "../../alice.key", "--data", "../../tmp", "--msg", "../../ack.msg"]
+            "args":["recv", "--me", "alice@sour.is", "--them", "bob@sour.is", "--key", "../../alice.key", "--state", "../../tmp", "--msg", "../../ack.msg"]
         },
 
         {
-            "name": "send msg",
+            "name": "chat",
             "type": "go",
             "request": "launch",
             "mode": "auto",
             "program": "./cmd/ratchet",
-            "args":["send", "--me", "alice@sour.is", "--them", "bob@sour.is", "--key", "../../alice.key", "--data", "../../tmp", "--msg", "../../text.msg"]
+            "args":["--me", "alice@sour.is", "--them", "bob@sour.is", "--key", "../../alice.key", "--state", "../../tmp", "chat"]
         }
 
     ]

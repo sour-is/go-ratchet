@@ -10,11 +10,14 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
 
+	"git.mills.io/prologic/msgbus"
+	"git.mills.io/prologic/msgbus/client"
 	"github.com/docopt/docopt-go"
 	"go.mills.io/saltyim"
 
@@ -32,6 +35,7 @@ Options:
   --them <them>    Their acct name [default: $USER@$DOMAIN]
   --state <state>  Session state path [default: ` + xdg.Get(xdg.EnvDataHome, "rachet") + `]
   --msg <msg>      Msg to read in. [default: stdin]
+  --post           Send to msgbus
 `
 
 type opts struct {
@@ -40,6 +44,7 @@ type opts struct {
 	Recv  bool `docopt:"recv"`
 	Close bool `docopt:"close"`
 	Chat  bool `docopt:"chat"`
+	Post  bool `docopt:"--post"`
 
 	Me    string `docopt:"--me"`
 	Key   string `docopt:"--key"`
@@ -61,10 +66,10 @@ func NewSession(me ed25519.PrivateKey, name string, them ed25519.PublicKey) *Ses
 			IdentityKey: me,
 		},
 	}
-	sess.SetPeer(name, them)
+	sess.SetPeerKey(name, them)
 	return sess
 }
-func (s *Session) SetPeer(name string, p ed25519.PublicKey) {
+func (s *Session) SetPeerKey(name string, p ed25519.PublicKey) {
 	s.Name = name
 	s.PeerKey = p
 	s.Session.VerifyPeer = func(peer ed25519.PublicKey) (valid bool) {
@@ -89,9 +94,10 @@ func (s *Session) MarshalBinary() ([]byte, error) {
 }
 func (s *Session) UnmarshalBinary(b []byte) error {
 	var o struct {
-		Name    string
-		Key     ed25519.PublicKey
-		Session []byte
+		Name     string
+		Endpoint []byte
+		Key      ed25519.PublicKey
+		Session  []byte
 	}
 
 	err := gob.NewDecoder(bytes.NewReader(b)).Decode(&o)
@@ -101,7 +107,7 @@ func (s *Session) UnmarshalBinary(b []byte) error {
 
 	s.Session = &xochimilco.Session{}
 	s.Session.UnmarshalBinary(o.Session)
-	s.SetPeer(o.Name, o.Key)
+	s.SetPeerKey(o.Name, o.Key)
 
 	return err
 }
@@ -122,13 +128,13 @@ func main() {
 		defer cancel() // restore interrupt function
 	}()
 
-	if err := run(opts); err != nil {
+	if err := run(ctx, opts); err != nil {
 		log(err)
 		os.Exit(1)
 	}
 }
 
-func run(opts opts) error {
+func run(ctx context.Context, opts opts) error {
 	switch {
 	// case opts.Gen:
 	// todo?
@@ -146,18 +152,36 @@ func run(opts opts) error {
 			return fmt.Errorf("read session: %w", err)
 		}
 
-		offerMsg, err := sess.Offer()
+		msg, err := sess.Offer()
 		if err != nil {
 			return err
 		}
 
-		fmt.Println("ratchet", opts.Me, offerMsg)
-		return sm.Put(sess)
+		err = sm.Put(sess)
+		if err != nil {
+			return err
+		}
+
+		fmt.Println("ratchet", opts.Me, msg)
+		if opts.Post {
+			addr, err := saltyim.LookupAddr(opts.Them)
+			if err != nil {
+				return err
+			}
+			b := &bytes.Buffer{}
+			fmt.Fprintln(b, "ratchet", opts.Me, msg)
+			_, err = http.DefaultClient.Post(addr.Endpoint().String(), "text/plain", b)
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
 
 	case opts.Send:
 		sm := NewSessionManager(opts.State, opts.Me, nil)
 
-		input, them, err := readInput(opts.Msg, opts.Them)
+		input, them, err := readInputFile(opts.Msg, opts.Them)
 		if err != nil {
 			return fmt.Errorf("reading input: %w", err)
 		}
@@ -171,9 +195,27 @@ func run(opts opts) error {
 		if err != nil {
 			return fmt.Errorf("send: %w", err)
 		}
+		err = sm.Put(sess)
+		if err != nil {
+			return err
+		}
 
 		fmt.Println("ratchet", opts.Me, msg)
-		return sm.Put(sess)
+		if opts.Post {
+			addr, err := saltyim.LookupAddr(opts.Them)
+			if err != nil {
+				return err
+			}
+
+			b := &bytes.Buffer{}
+			fmt.Fprintln(b, "ratchet", opts.Me, msg)
+			_, err = http.DefaultClient.Post(addr.Endpoint().String(), "text/plain", b)
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
 
 	case opts.Recv:
 		key, err := readSaltyIdentity(opts.Key)
@@ -183,7 +225,7 @@ func run(opts opts) error {
 
 		sm := NewSessionManager(opts.State, opts.Me, key)
 
-		input, them, err := readInput(opts.Msg, opts.Them)
+		input, them, err := readInputFile(opts.Msg, opts.Them)
 		if err != nil {
 			return fmt.Errorf("reading input from %s: %w", them, err)
 		}
@@ -197,6 +239,10 @@ func run(opts opts) error {
 		if err != nil {
 			return fmt.Errorf("session receive: %w", err)
 		}
+		err = sm.Put(sess)
+		if err != nil {
+			return err
+		}
 
 		switch {
 		case isClosed:
@@ -206,13 +252,26 @@ func run(opts opts) error {
 			log("GOT: session established with ", them, "...")
 			if len(msg) > 0 {
 				fmt.Println("ratchet", opts.Me, string(msg))
+				if opts.Post {
+					addr, err := saltyim.LookupAddr(opts.Them)
+					if err != nil {
+						return err
+					}
+
+					b := &bytes.Buffer{}
+					fmt.Fprintln(b, "ratchet", opts.Me, msg)
+					_, err = http.DefaultClient.Post(addr.Endpoint().String(), "text/plain", b)
+					if err != nil {
+						return err
+					}
+				}
 			}
 
 		default:
 			log("GOT: ", them, ">", string(msg))
 		}
 
-		return sm.Put(sess)
+		return nil
 
 	case opts.Close:
 		sm := NewSessionManager(opts.State, opts.Me, nil)
@@ -227,10 +286,107 @@ func run(opts opts) error {
 			return fmt.Errorf("session close: %w", err)
 		}
 
+		err = sm.Delete(sess)
+		if err != nil {
+			return err
+		}
+
 		fmt.Println("ratchet", opts.Me, msg)
-		return sm.Delete(sess)
+		if opts.Post {
+			addr, err := saltyim.LookupAddr(opts.Them)
+			if err != nil {
+				return err
+			}
+
+			b := &bytes.Buffer{}
+			fmt.Fprintln(b, "ratchet", opts.Me, msg)
+			_, err = http.DefaultClient.Post(addr.Endpoint().String(), "text/plain", b)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
 
 	case opts.Chat:
+		key, err := readSaltyIdentity(opts.Key)
+		if err != nil {
+			return fmt.Errorf("reading keyfile: %w", err)
+		}
+
+		addr, err := saltyim.LookupAddr(opts.Me)
+		if err != nil {
+			return fmt.Errorf("lookup addr: %w", err)
+		}
+
+		sm := NewSessionManager(opts.State, opts.Me, key)
+		_ = sm
+
+		uri, inbox := saltyim.SplitInbox(addr.Endpoint().String())
+		bus := client.NewClient(uri, nil)
+
+		log("listen to", uri, inbox)
+
+		handleFn := func(in *msgbus.Message) error {
+			input := string(in.Payload)
+			if !strings.HasPrefix(input, "ratchet") {
+				return nil
+			}
+
+			log(input)
+			them := ""
+			input = strings.TrimPrefix(input, "ratchet ")
+			if n, m, ok := strings.Cut(input, " "); ok {
+				them = n
+				input = m
+			}
+			input = strings.TrimSpace(input)
+
+			sess, err := sm.Get(them)
+			if err != nil {
+				return fmt.Errorf("get session: %w", err)
+			}
+
+			isEstablished, isClosed, msg, err := sess.Receive(input)
+			if err != nil {
+				return fmt.Errorf("session receive: %w", err)
+			}
+			err = sm.Put(sess)
+			if err != nil {
+				return err
+			}
+
+			switch {
+			case isClosed:
+				log("GOT: closing session...")
+				return sm.Delete(sess)
+			case isEstablished:
+				log("GOT: session established with ", them, "...")
+				if len(msg) > 0 {
+					fmt.Println("ratchet", opts.Me, string(msg))
+					if opts.Post {
+						addr, err := saltyim.LookupAddr(them)
+						if err != nil {
+							return err
+						}
+
+						b := &bytes.Buffer{}
+						fmt.Fprintln(b, "ratchet", opts.Me, string(msg))
+						_, err = http.DefaultClient.Post(addr.Endpoint().String(), "text/plain", b)
+						if err != nil {
+							return err
+						}
+					}
+				}
+			default:
+				log("GOT: ", them, ">", string(msg))
+
+			}
+
+			return nil
+		}
+
+		s := bus.Subscribe(inbox, 0, handleFn)
+		return s.Run(ctx)
 
 	default:
 		log(usage)
@@ -290,7 +446,7 @@ func log(a ...any) {
 	fmt.Fprintln(os.Stderr, a...)
 }
 
-func readInput(input string, them string) (msg string, name string, err error) {
+func readInputFile(input string, them string) (msg string, name string, err error) {
 	var r io.ReadCloser
 	if input == "stdin" {
 		r = os.Stdin
@@ -307,7 +463,6 @@ func readInput(input string, them string) (msg string, name string, err error) {
 		return
 	}
 	msg = strings.TrimPrefix(msg, "ratchet ")
-
 	name = them
 	if n, m, ok := strings.Cut(msg, " "); ok {
 		name = n
