@@ -33,11 +33,11 @@ func TestMessageMarshall(t *testing.T) {
 		},
 		{
 			t: sessData,
-			m: &dataMessage{1, 2, 3, 4, 5, 6, 7},
+			m: &dataMessage{nil, []byte{1, 2, 3, 4, 5, 6, 7}},
 		},
 		{
 			t: sessClose,
-			m: &closeMessage{0xff},
+			m: &closeMessage{nil, []byte{0xff}},
 		},
 	}
 

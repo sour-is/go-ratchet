@@ -30,6 +30,12 @@ import (
 // Furthermore, the Session can be closed again (Close). Incoming messages can
 // be inspected and the payload extracted, if present (Receive).
 type Session struct {
+	// LocalUUID is a unique identifier for the session. Provided in the offer.
+	LocalUUID  []byte
+	RemoteUUID []byte
+
+	Me string
+
 	// IdentityKey is this node's private Ed25519 identity key.
 	//
 	// This will only be used within the X3DH key agreement protocol. The other
@@ -64,11 +70,17 @@ func (sess *Session) MarshalBinary() ([]byte, error) {
 		}
 	}
 	o := struct {
+		LocalUUID    []byte
+		RemoteUUID   []byte
+		Me           string
 		IdentityKey  []byte
 		SpkPub       []byte
 		SpkPriv      []byte
 		DoubleRachet []byte
 	}{
+		sess.LocalUUID,
+		sess.RemoteUUID,
+		sess.Me,
 		sess.IdentityKey,
 		sess.spkPub,
 		sess.spkPriv,
@@ -80,6 +92,9 @@ func (sess *Session) MarshalBinary() ([]byte, error) {
 }
 func (sess *Session) UnmarshalBinary(b []byte) error {
 	var o struct {
+		LocalUUID    []byte
+		RemoteUUID   []byte
+		Me           string
 		IdentityKey  []byte
 		SpkPub       []byte
 		SpkPriv      []byte
@@ -90,6 +105,9 @@ func (sess *Session) UnmarshalBinary(b []byte) error {
 		return err
 	}
 
+	sess.Me = o.Me
+	sess.LocalUUID = o.LocalUUID
+	sess.RemoteUUID = o.RemoteUUID
 	sess.IdentityKey = o.IdentityKey
 	sess.spkPub = o.SpkPub
 	sess.spkPriv = o.SpkPriv
@@ -117,7 +135,10 @@ func (sess *Session) Offer() (offerMsg string, err error) {
 		idKey: sess.IdentityKey.Public().(ed25519.PublicKey),
 		spKey: spkPub,
 		spSig: spkSig,
+		uuid:  sess.LocalUUID,
+		nick:  []byte(sess.Me),
 	}
+
 	offerMsg, err = marshalMessage(sessOffer, offer)
 	return
 }
@@ -154,6 +175,7 @@ func (sess *Session) receiveOffer(offer *offerMessage) (isEstablished bool, ackM
 		return
 	}
 
+	sess.RemoteUUID = offer.uuid
 	sess.doubleRatchet, err = doubleratchet.CreateActive(sessKey, associatedData, offer.spKey)
 	if err != nil {
 		return
@@ -161,7 +183,8 @@ func (sess *Session) receiveOffer(offer *offerMessage) (isEstablished bool, ackM
 
 	// This will be padded up to 32 bytes for AES-256.
 	initialPayload := make([]byte, 23)
-	if _, err = rand.Read(initialPayload); err != nil {
+	copy(initialPayload[:16], sess.LocalUUID)
+	if _, err = rand.Read(initialPayload[16:]); err != nil {
 		return
 	}
 	initialCiphertext, err := sess.doubleRatchet.Encrypt(initialPayload)
@@ -174,10 +197,11 @@ func (sess *Session) receiveOffer(offer *offerMessage) (isEstablished bool, ackM
 		idKey:  sess.IdentityKey.Public().(ed25519.PublicKey),
 		eKey:   ekPub,
 		cipher: initialCiphertext,
+		uuid:   sess.RemoteUUID,
 	}
 	ackMsg, err = marshalMessage(sessAck, ack)
 
-	return 
+	return
 }
 
 // receiveAck deals with incoming sessAck messages.
@@ -206,13 +230,15 @@ func (sess *Session) receiveAck(ack *ackMessage) (isEstablished bool, err error)
 	if err != nil {
 		return
 	}
-
+	// sess.LocalUUID = ack.uuid
 	sess.spkPub, sess.spkPriv = nil, nil
 
-	_, err = sess.doubleRatchet.Decrypt(ack.cipher)
+	plaintext, err := sess.doubleRatchet.Decrypt(ack.cipher)
 	if err != nil {
 		return
 	}
+
+	sess.RemoteUUID = plaintext[:16]
 
 	isEstablished = true
 	return
@@ -225,7 +251,7 @@ func (sess *Session) receiveData(data *dataMessage) (plaintext []byte, err error
 		return
 	}
 
-	ciphertext := []byte(*data)
+	ciphertext := data.payload
 	plaintext, err = sess.doubleRatchet.Decrypt(ciphertext)
 	return
 }
@@ -241,28 +267,30 @@ func (sess *Session) receiveData(data *dataMessage) (plaintext []byte, err error
 // case of an incoming encrypted message, the plaintext field holds its
 // decrypted plaintext value. Of course, there might also be an error.
 func (sess *Session) Receive(msg string) (isEstablished, isClosed bool, plaintext []byte, err error) {
-	msgType, msgIf, err := unmarshalMessage(msg)
+	_, msgIf, err := unmarshalMessage(msg)
 	if err != nil {
 		return
 	}
-
-	switch msgType {
-	case sessOffer:
+	return sess.ReceiveMsg(msgIf)
+}
+func (sess *Session) ReceiveMsg(msg Msg) (isEstablished, isClosed bool, plaintext []byte, err error) {
+	switch msg := msg.(type) {
+	case *offerMessage:
 		var txt string
-		isEstablished, txt, err = sess.receiveOffer(msgIf.(*offerMessage))
+		isEstablished, txt, err = sess.receiveOffer(msg)
 		plaintext = []byte(txt)
 
-	case sessAck:
-		isEstablished, err = sess.receiveAck(msgIf.(*ackMessage))
+	case *ackMessage:
+		isEstablished, err = sess.receiveAck(msg)
 
-	case sessData:
-		plaintext, err = sess.receiveData(msgIf.(*dataMessage))
+	case *dataMessage:
+		plaintext, err = sess.receiveData(msg)
 
-	case sessClose:
+	case *closeMessage:
 		isClosed = true
 
 	default:
-		err = fmt.Errorf("received an unexpected message type %d", msgType)
+		err = fmt.Errorf("received an unexpected message type %T", msg)
 	}
 
 	return
@@ -284,7 +312,7 @@ func (sess *Session) Send(plaintext []byte) (dataMsg string, err error) {
 		return
 	}
 
-	dataMsg, err = marshalMessage(sessData, dataMessage(ciphertext))
+	dataMsg, err = marshalMessage(sessData, &dataMessage{sess.RemoteUUID, ciphertext})
 	return
 }
 
@@ -295,6 +323,6 @@ func (sess *Session) Close() (closeMsg string, err error) {
 	sess.spkPub, sess.spkPriv = nil, nil
 	sess.doubleRatchet = nil
 
-	closeMsg, err = marshalMessage(sessClose, closeMessage{0xff})
+	closeMsg, err = marshalMessage(sessClose, &closeMessage{sess.RemoteUUID, []byte{0xff}})
 	return
 }

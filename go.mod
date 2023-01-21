@@ -9,6 +9,11 @@ require (
 )
 
 require (
+	github.com/oklog/ulid v1.3.1 // indirect
+	github.com/oklog/ulid/v2 v2.1.0
+)
+
+require (
 	git.mills.io/prologic/msgbus v0.1.19
 	github.com/ScaleFT/sshkeys v0.0.0-20200327173127-6142f742bca5 // indirect
 	github.com/andybalholm/brotli v1.0.4 // indirect
@@ -34,8 +39,6 @@ require (
 	github.com/logrusorgru/aurora v2.0.3+incompatible // indirect
 	github.com/matryer/is v1.4.0
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
-	github.com/oklog/ulid v1.3.1 // indirect
-	github.com/oklog/ulid/v2 v2.0.2 // indirect
 	github.com/petermattis/goid v0.0.0-20220331194723-8ee3e6ded87a // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/posener/formatter v1.0.0 // indirect

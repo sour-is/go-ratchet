@@ -5,6 +5,8 @@
 package xochimilco
 
 import (
+	"bytes"
+	"crypto/ed25519"
 	"crypto/subtle"
 	"encoding"
 	"encoding/base64"
@@ -36,11 +38,18 @@ const (
 	sessClose
 
 	// Prefix indicates the beginning of an encoded message.
-	Prefix string = "!XO!"
+	Prefix string = "!RAT!"
 
 	// Suffix indicates the end of an encoded message.
-	Suffix string = "!OX!"
+	Suffix string = "!CHT!"
 )
+
+type Msg interface{interface{ ID() []byte }}
+
+func Parse(in string) (Msg, error) {
+	_, m, err := unmarshalMessage(in)
+	return m, err
+}
 
 // marshalMessage creates the entire encoded message from a struct.
 func marshalMessage(t messageType, m encoding.BinaryMarshaler) (out string, err error) {
@@ -54,7 +63,7 @@ func marshalMessage(t messageType, m encoding.BinaryMarshaler) (out string, err 
 		return
 	}
 
-	b64 := base64.NewEncoder(base64.StdEncoding, b)
+	b64 := base64.NewEncoder(base64.RawURLEncoding, b)
 	if _, err = b64.Write(data); err != nil {
 		return
 	}
@@ -69,7 +78,7 @@ func marshalMessage(t messageType, m encoding.BinaryMarshaler) (out string, err 
 }
 
 // unmarshalMessage recreates the struct for an encoded message.
-func unmarshalMessage(in string) (t messageType, m interface{}, err error) {
+func unmarshalMessage(in string) (t messageType, m Msg, err error) {
 	if !strings.HasPrefix(in, Prefix) || !strings.HasSuffix(in, Suffix) {
 		err = fmt.Errorf("message string misses pre- and/or suffix")
 		return
@@ -89,7 +98,7 @@ func unmarshalMessage(in string) (t messageType, m interface{}, err error) {
 		return
 	}
 
-	data, err := base64.StdEncoding.DecodeString(in[len(Prefix)+1 : len(in)-len(Suffix)])
+	data, err := base64.RawURLEncoding.DecodeString(in[len(Prefix)+1 : len(in)-len(Suffix)])
 	if err != nil {
 		return
 	}
@@ -106,32 +115,56 @@ type offerMessage struct {
 	idKey []byte
 	spKey []byte
 	spSig []byte
+	uuid  []byte
+	nick  []byte
 }
 
 func (msg offerMessage) MarshalBinary() (data []byte, err error) {
-	data = make([]byte, 32+32+64)
+	data = make([]byte, 32+32+64+16+len(msg.nick))
 
 	copy(data[:32], msg.idKey)
 	copy(data[32:64], msg.spKey)
-	copy(data[64:], msg.spSig)
+	copy(data[64:128], msg.spSig)
+	copy(data[128:144], msg.uuid)
+	copy(data[144:], msg.nick)
 
 	return
 }
 
 func (msg *offerMessage) UnmarshalBinary(data []byte) (err error) {
-	if len(data) != 32+32+64 {
-		return fmt.Errorf("sessOffer payload MUST be of 128 byte")
+	if len(data) < 32+32+64+16 {
+		return fmt.Errorf("sessOffer payload MUST be greater than 144 byte")
 	}
 
 	msg.idKey = make([]byte, 32)
 	msg.spKey = make([]byte, 32)
 	msg.spSig = make([]byte, 64)
+	msg.uuid = make([]byte, 16)
+	msg.nick = make([]byte, len(data)-(32+32+64+16))
 
 	copy(msg.idKey, data[:32])
 	copy(msg.spKey, data[32:64])
-	copy(msg.spSig, data[64:])
+	copy(msg.spSig, data[64:128])
+	copy(msg.uuid, data[128:144])
+	copy(msg.nick, data[144:])
 
 	return
+}
+
+func (msg *offerMessage) Nick() string {
+	return string(msg.nick)
+}
+
+func (msg *offerMessage) ID() []byte {
+	return msg.uuid
+}
+
+func (msg *offerMessage) Key() ed25519.PublicKey {
+	return msg.idKey
+}
+
+func (msg *offerMessage) Equal(k ed25519.PublicKey) bool {
+	return bytes.Equal(msg.idKey, k)
 }
 
 // ackMessage is the second sessAck message for Bob to acknowledge Alice's
@@ -141,60 +174,117 @@ func (msg *offerMessage) UnmarshalBinary(data []byte) (err error) {
 type ackMessage struct {
 	idKey  []byte
 	eKey   []byte
+	uuid   []byte
 	cipher []byte
 }
 
 func (msg ackMessage) MarshalBinary() (data []byte, err error) {
-	data = make([]byte, 32+32+len(msg.cipher))
+	data = make([]byte, 32+32+16+len(msg.cipher))
 
 	copy(data[:32], msg.idKey)
 	copy(data[32:64], msg.eKey)
-	copy(data[64:], msg.cipher)
+	copy(data[64:80], msg.uuid)
+	copy(data[80:], msg.cipher)
 
 	return
 }
 
 func (msg *ackMessage) UnmarshalBinary(data []byte) (err error) {
-	if len(data) <= 32+32 {
-		return fmt.Errorf("sessAck payload MUST be >= 64 byte")
+	if len(data) <= 32+32+16 {
+		return fmt.Errorf("sessAck payload MUST be >= 80 byte")
 	}
 
 	msg.idKey = make([]byte, 32)
 	msg.eKey = make([]byte, 32)
-	msg.cipher = make([]byte, len(data)-64)
+	msg.uuid = make([]byte, 16)
+	msg.cipher = make([]byte, len(data)-80)
 
 	copy(msg.idKey, data[:32])
 	copy(msg.eKey, data[32:64])
-	copy(msg.cipher, data[64:])
+	copy(msg.uuid, data[64:80])
+	copy(msg.cipher, data[80:])
 
 	return
+}
+
+func (msg *ackMessage) ID() []byte {
+	return msg.uuid
+}
+
+func (msg *ackMessage) Key() ed25519.PublicKey {
+	return msg.idKey
+}
+
+func (msg *ackMessage) Equal(k ed25519.PublicKey) bool {
+	return bytes.Equal(msg.idKey, k)
 }
 
 // dataMessage is the sessData message for the bidirectional exchange of
 // encrypted ciphertext. Thus, its length is dynamic.
-type dataMessage []byte
+type dataMessage struct {
+	uuid    []byte
+	payload []byte
+}
 
-func (msg dataMessage) MarshalBinary() (data []byte, err error) {
-	return msg, nil
+func (msg *dataMessage) ID() []byte {
+	return msg.uuid
+}
+
+func (msg *dataMessage) MarshalBinary() (data []byte, err error) {
+	data = make([]byte, 16+len(msg.payload))
+	
+	copy(data[:16], msg.uuid)
+	copy(data[16:], msg.payload)
+
+	return data, nil
 }
 
 func (msg *dataMessage) UnmarshalBinary(data []byte) (err error) {
-	*msg = data
+	if len(data) <= 16 {
+		return fmt.Errorf("sessAck payload MUST be >= 16 byte")
+	}
+
+	msg.uuid = make([]byte, 16)
+	msg.payload = make([]byte, len(data)-16)
+
+	copy(msg.uuid, data[:16])
+	copy(msg.payload, data[16:])
+
 	return
 }
 
 // closeMessage is the bidirectional sessClose message. Its payload ix 0xff.
-type closeMessage []byte
+type closeMessage struct {
+	uuid    []byte
+	payload []byte
+}
 
-func (msg closeMessage) MarshalBinary() (data []byte, err error) {
-	return msg, nil
+func (msg *closeMessage) ID() []byte {
+	return msg.uuid
+}
+
+func (msg *closeMessage) MarshalBinary() (data []byte, err error) {
+	data = make([]byte, 16+len(msg.payload))
+	
+	copy(data[:16], msg.uuid)
+	copy(data[16:], msg.payload)
+
+	return data, nil
 }
 
 func (msg *closeMessage) UnmarshalBinary(data []byte) (err error) {
-	if subtle.ConstantTimeCompare(data, []byte{0xff}) != 1 {
+	if len(data) <= 16 {
+		return fmt.Errorf("sessAck payload MUST be >= 16 byte")
+	}
+
+	msg.uuid = make([]byte, 16)
+	msg.payload = make([]byte, len(data)-16)
+
+	copy(msg.uuid, data[:16])
+	copy(msg.payload, data[16:])
+
+	if subtle.ConstantTimeCompare(msg.payload, []byte{0xff}) != 1 {
 		err = fmt.Errorf("sessClose has an inavlid payload")
-	} else {
-		*msg = data
 	}
 
 	return

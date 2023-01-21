@@ -8,39 +8,39 @@ run:
 	@rm -rf ./tmp
 	@echo Alice starts by offering Bob to upgrade the connection.
 	@echo
-	go run ./cmd/ratchet offer --me $(ALICE) --them $(BOB) --key $(ALICE_KEY) --state ./tmp | tee offer.msg
+	go run ./cmd/ratchet --key $(ALICE_KEY) --state ./tmp offer $(BOB) | tee offer.msg
 
 	@echo
 	@echo "Bob acknowledges Alice's offer."
 	@echo
-	cat offer.msg | go run ./cmd/ratchet recv --me $(BOB) --key $(BOB_KEY) --state ./tmp | tee ack.msg
-
+	go run ./cmd/ratchet --key $(BOB_KEY) --state ./tmp --msg offer.msg recv | tee ack.msg
+	
 	@echo
 	@echo "Alice evaluates Bob's acknowledgement."
 	@echo
-	@cat ack.msg | go run ./cmd/ratchet recv --me $(ALICE) --key $(ALICE_KEY)  --state ./tmp 
+	@cat ack.msg | go run ./cmd/ratchet --key $(ALICE_KEY) --state ./tmp recv  
 
 	@echo
 	@echo Alice sends message
 	@echo
-	echo hello | go run ./cmd/ratchet send --me $(ALICE) --them $(BOB) --key $(ALICE_KEY)  --state ./tmp | tee send1.msg
+	echo hello | go run ./cmd/ratchet --key $(ALICE_KEY) --state ./tmp send $(BOB) | tee send1.msg
 
 	@echo
 	@echo Bob receives message. sends reply
 	@echo
-	@cat send1.msg | go run ./cmd/ratchet recv --me $(BOB) --key $(BOB_KEY) --state ./tmp 
-	@echo yoyo | go run ./cmd/ratchet send --me $(BOB) --them $(ALICE) --key $(BOB_KEY)  --state ./tmp | tee send2.msg
+	@cat send1.msg | go run ./cmd/ratchet --key $(BOB_KEY) --state ./tmp recv 
+	@echo yoyo | go run ./cmd/ratchet --key $(BOB_KEY)  --state ./tmp send $(ALICE) | tee send2.msg
 
 	@echo
 	@echo Alice receives message. sends close
 	@echo
-	@cat send2.msg | go run ./cmd/ratchet recv --me $(ALICE) --key $(ALICE_KEY)  --state ./tmp 	
-	go run ./cmd/ratchet close --me $(ALICE) --them $(BOB) --key $(ALICE_KEY)  --state ./tmp | tee close.msg
+	@cat send2.msg | go run ./cmd/ratchet --key $(ALICE_KEY)  --state ./tmp recv	
+	go run ./cmd/ratchet --key $(ALICE_KEY)  --state ./tmp close $(BOB)| tee close.msg
 
 	@echo
 	@echo Bob receives close.
 	@echo
-	@cat close.msg | go run ./cmd/ratchet recv --me $(BOB)  --them $(ALICE) --key $(BOB_KEY) --state ./tmp 
+	@cat close.msg | go run ./cmd/ratchet --key $(BOB_KEY) --state ./tmp recv
 
 
 chat-bob:

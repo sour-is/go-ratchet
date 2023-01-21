@@ -7,9 +7,11 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/gob"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/signal"
@@ -19,6 +21,7 @@ import (
 	"git.mills.io/prologic/msgbus"
 	"git.mills.io/prologic/msgbus/client"
 	"github.com/docopt/docopt-go"
+	"github.com/oklog/ulid/v2"
 	"go.mills.io/saltyim"
 
 	"github.com/sour-is/xochimilco"
@@ -26,13 +29,15 @@ import (
 )
 
 var usage = `Rachet Chat.
-usage:
-  ratchet [options] [offer|recv|send|close|chat]
+Usage:
+  ratchet [options] recv
+  ratchet [options] (offer|send|close) <them>
+
+Args:
+  <them>           Receiver acct name to use in offer. 
 
 Options:
-  --me <me>        My acct name
-  --key <key>      From key [default: ` + xdg.Get(xdg.EnvConfigHome, "rachet/$USER.key") + `]
-  --them <them>    Their acct name [default: $USER@$DOMAIN]
+  --key <key>      Sender private key [default: ` + xdg.Get(xdg.EnvConfigHome, "rachet/$USER.key") + `]
   --state <state>  Session state path [default: ` + xdg.Get(xdg.EnvDataHome, "rachet") + `]
   --msg <msg>      Msg to read in. [default: stdin]
   --post           Send to msgbus
@@ -46,11 +51,12 @@ type opts struct {
 	Chat  bool `docopt:"chat"`
 	Post  bool `docopt:"--post"`
 
-	Me    string `docopt:"--me"`
-	Key   string `docopt:"--key"`
-	Them  string `docopt:"--them"`
-	State string `docopt:"--state"`
-	Msg   string `docopt:"--msg"`
+	Them string `docopt:"<them>"`
+
+	Key     string `docopt:"--key"`
+	Session string `docopt:"--session"`
+	State   string `docopt:"--state"`
+	Msg     string `docopt:"--msg"`
 }
 
 type Session struct {
@@ -60,10 +66,12 @@ type Session struct {
 	*xochimilco.Session
 }
 
-func NewSession(me ed25519.PrivateKey, name string, them ed25519.PublicKey) *Session {
+func NewSession(id ulid.ULID, me string, key ed25519.PrivateKey, name string, them ed25519.PublicKey) *Session {
 	sess := &Session{
 		Session: &xochimilco.Session{
-			IdentityKey: me,
+			IdentityKey: key,
+			Me:          me,
+			LocalUUID:   id[:],
 		},
 	}
 	sess.SetPeerKey(name, them)
@@ -135,23 +143,26 @@ func main() {
 }
 
 func run(ctx context.Context, opts opts) error {
+	// log(opts)
+
 	switch {
 	// case opts.Gen:
 	// todo?
 
 	case opts.Offer:
-		key, err := readSaltyIdentity(opts.Key)
+		me, key, err := readSaltyIdentity(opts.Key)
 		if err != nil {
 			return fmt.Errorf("reading keyfile: %w", err)
 		}
 
-		sm := NewSessionManager(opts.State, opts.Me, key)
+		sm := NewSessionManager(opts.State, me, key)
 
-		sess, err := sm.Get(opts.Them)
+		sess, err := sm.New(opts.Them)
 		if err != nil {
 			return fmt.Errorf("read session: %w", err)
 		}
-
+		log("local session", toULID(sess.LocalUUID).String())
+		log("remote session", toULID(sess.RemoteUUID).String())
 		msg, err := sess.Offer()
 		if err != nil {
 			return err
@@ -162,15 +173,13 @@ func run(ctx context.Context, opts opts) error {
 			return err
 		}
 
-		fmt.Println("ratchet", opts.Me, msg)
+		fmt.Println(msg)
 		if opts.Post {
 			addr, err := saltyim.LookupAddr(opts.Them)
 			if err != nil {
 				return err
 			}
-			b := &bytes.Buffer{}
-			fmt.Fprintln(b, "ratchet", opts.Me, msg)
-			_, err = http.DefaultClient.Post(addr.Endpoint().String(), "text/plain", b)
+			_, err = http.DefaultClient.Post(addr.Endpoint().String(), "text/plain", strings.NewReader(msg))
 			if err != nil {
 				return err
 			}
@@ -179,17 +188,25 @@ func run(ctx context.Context, opts opts) error {
 		return nil
 
 	case opts.Send:
-		sm := NewSessionManager(opts.State, opts.Me, nil)
+		me, key, err := readSaltyIdentity(opts.Key)
+		if err != nil {
+			return fmt.Errorf("reading keyfile: %w", err)
+		}
 
-		input, them, err := readInputFile(opts.Msg, opts.Them)
+		sm := NewSessionManager(opts.State, me, key)
+
+		input, err := readInputFile(opts.Msg)
 		if err != nil {
 			return fmt.Errorf("reading input: %w", err)
 		}
 
-		sess, err := sm.Get(them)
+		sess, err := sm.Get(opts.Them)
 		if err != nil {
 			return fmt.Errorf("read session: %w", err)
 		}
+		log("me:", me, "send:", opts.Them)
+		log("local session", toULID(sess.LocalUUID).String())
+		log("remote session", toULID(sess.RemoteUUID).String())
 
 		msg, err := sess.Send([]byte(input))
 		if err != nil {
@@ -200,16 +217,14 @@ func run(ctx context.Context, opts opts) error {
 			return err
 		}
 
-		fmt.Println("ratchet", opts.Me, msg)
+		fmt.Println(msg)
 		if opts.Post {
 			addr, err := saltyim.LookupAddr(opts.Them)
 			if err != nil {
 				return err
 			}
 
-			b := &bytes.Buffer{}
-			fmt.Fprintln(b, "ratchet", opts.Me, msg)
-			_, err = http.DefaultClient.Post(addr.Endpoint().String(), "text/plain", b)
+			_, err = http.DefaultClient.Post(addr.Endpoint().String(), "text/plain", strings.NewReader(msg))
 			if err != nil {
 				return err
 			}
@@ -218,27 +233,40 @@ func run(ctx context.Context, opts opts) error {
 		return nil
 
 	case opts.Recv:
-		key, err := readSaltyIdentity(opts.Key)
+		me, key, err := readSaltyIdentity(opts.Key)
 		if err != nil {
 			return fmt.Errorf("reading keyfile: %w", err)
 		}
 
-		sm := NewSessionManager(opts.State, opts.Me, key)
+		sm := NewSessionManager(opts.State, me, key)
 
-		input, them, err := readInputFile(opts.Msg, opts.Them)
+		id, msg, err := readInputMsg(opts.Msg)
 		if err != nil {
-			return fmt.Errorf("reading input from %s: %w", them, err)
+			return fmt.Errorf("reading input: %w", err)
 		}
+		log("msg session", id.String())
 
-		sess, err := sm.Get(them)
-		if err != nil {
-			return fmt.Errorf("get session: %w", err)
+		var sess *Session
+		if offer, ok := msg.(interface{ Nick() string }); ok {
+			sess, err = sm.Get(offer.Nick())
+			if err != nil {
+				return fmt.Errorf("get session: %w", err)
+			}
+		} else {
+			sess, err = sm.GetID(id)
+			if err != nil {
+				return fmt.Errorf("get session: %w", err)
+			}
 		}
+		log("local session", toULID(sess.LocalUUID).String())
+		log("remote session", toULID(sess.RemoteUUID).String())
 
-		isEstablished, isClosed, msg, err := sess.Receive(input)
+		isEstablished, isClosed, plaintext, err := sess.ReceiveMsg(msg)
 		if err != nil {
 			return fmt.Errorf("session receive: %w", err)
 		}
+		log("(updated) remote session", toULID(sess.RemoteUUID).String())
+
 		err = sm.Put(sess)
 		if err != nil {
 			return err
@@ -249,18 +277,16 @@ func run(ctx context.Context, opts opts) error {
 			log("GOT: closing session...")
 			return sm.Delete(sess)
 		case isEstablished:
-			log("GOT: session established with ", them, "...")
-			if len(msg) > 0 {
-				fmt.Println("ratchet", opts.Me, string(msg))
+			log("GOT: session established with ", sess.Name, "...")
+			if len(plaintext) > 0 {
+				fmt.Println(string(plaintext))
 				if opts.Post {
 					addr, err := saltyim.LookupAddr(opts.Them)
 					if err != nil {
 						return err
 					}
 
-					b := &bytes.Buffer{}
-					fmt.Fprintln(b, "ratchet", opts.Me, msg)
-					_, err = http.DefaultClient.Post(addr.Endpoint().String(), "text/plain", b)
+					_, err = http.DefaultClient.Post(addr.Endpoint().String(), "text/plain", bytes.NewReader(plaintext))
 					if err != nil {
 						return err
 					}
@@ -268,13 +294,18 @@ func run(ctx context.Context, opts opts) error {
 			}
 
 		default:
-			log("GOT: ", them, ">", string(msg))
+			log("GOT: ", sess.Name, ">", string(plaintext))
 		}
 
 		return nil
 
 	case opts.Close:
-		sm := NewSessionManager(opts.State, opts.Me, nil)
+		me, key, err := readSaltyIdentity(opts.Key)
+		if err != nil {
+			return fmt.Errorf("reading keyfile: %w", err)
+		}
+
+		sm := NewSessionManager(opts.State, me, key)
 
 		sess, err := sm.Get(opts.Them)
 		if err != nil {
@@ -291,16 +322,14 @@ func run(ctx context.Context, opts opts) error {
 			return err
 		}
 
-		fmt.Println("ratchet", opts.Me, msg)
+		fmt.Println(msg)
 		if opts.Post {
 			addr, err := saltyim.LookupAddr(opts.Them)
 			if err != nil {
 				return err
 			}
 
-			b := &bytes.Buffer{}
-			fmt.Fprintln(b, "ratchet", opts.Me, msg)
-			_, err = http.DefaultClient.Post(addr.Endpoint().String(), "text/plain", b)
+			_, err = http.DefaultClient.Post(addr.Endpoint().String(), "text/plain", strings.NewReader(msg))
 			if err != nil {
 				return err
 			}
@@ -308,17 +337,17 @@ func run(ctx context.Context, opts opts) error {
 		return nil
 
 	case opts.Chat:
-		key, err := readSaltyIdentity(opts.Key)
+		me, key, err := readSaltyIdentity(opts.Key)
 		if err != nil {
 			return fmt.Errorf("reading keyfile: %w", err)
 		}
 
-		addr, err := saltyim.LookupAddr(opts.Me)
+		addr, err := saltyim.LookupAddr(me)
 		if err != nil {
 			return fmt.Errorf("lookup addr: %w", err)
 		}
 
-		sm := NewSessionManager(opts.State, opts.Me, key)
+		sm := NewSessionManager(opts.State, me, key)
 		_ = sm
 
 		uri, inbox := saltyim.SplitInbox(addr.Endpoint().String())
@@ -333,20 +362,17 @@ func run(ctx context.Context, opts opts) error {
 			}
 
 			log(input)
-			them := ""
-			input = strings.TrimPrefix(input, "ratchet ")
-			if n, m, ok := strings.Cut(input, " "); ok {
-				them = n
-				input = m
+			id, msg, err := readInputMsg(input)
+			if err != nil {
+				return err
 			}
-			input = strings.TrimSpace(input)
 
-			sess, err := sm.Get(them)
+			sess, err := sm.GetID(id)
 			if err != nil {
 				return fmt.Errorf("get session: %w", err)
 			}
 
-			isEstablished, isClosed, msg, err := sess.Receive(input)
+			isEstablished, isClosed, plaintext, err := sess.ReceiveMsg(msg)
 			if err != nil {
 				return fmt.Errorf("session receive: %w", err)
 			}
@@ -360,25 +386,23 @@ func run(ctx context.Context, opts opts) error {
 				log("GOT: closing session...")
 				return sm.Delete(sess)
 			case isEstablished:
-				log("GOT: session established with ", them, "...")
-				if len(msg) > 0 {
-					fmt.Println("ratchet", opts.Me, string(msg))
+				log("GOT: session established with ", sess.Name, "...")
+				if len(plaintext) > 0 {
+					fmt.Println(string(plaintext))
 					if opts.Post {
-						addr, err := saltyim.LookupAddr(them)
+						addr, err := saltyim.LookupAddr(sess.Name)
 						if err != nil {
 							return err
 						}
 
-						b := &bytes.Buffer{}
-						fmt.Fprintln(b, "ratchet", opts.Me, string(msg))
-						_, err = http.DefaultClient.Post(addr.Endpoint().String(), "text/plain", b)
+						_, err = http.DefaultClient.Post(addr.Endpoint().String(), "text/plain", bytes.NewReader(plaintext))
 						if err != nil {
 							return err
 						}
 					}
 				}
 			default:
-				log("GOT: ", them, ">", string(msg))
+				log("GOT: ", sess.Name, ">", string(plaintext))
 
 			}
 
@@ -398,32 +422,32 @@ func run(ctx context.Context, opts opts) error {
 func enc(b []byte) string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
-func readSaltyIdentity(keyfile string) (ed25519.PrivateKey, error) {
+func readSaltyIdentity(keyfile string) (string, ed25519.PrivateKey, error) {
 	fd, err := os.Stat(keyfile)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 
 	if fd.Mode()&0066 != 0 {
-		return nil, fmt.Errorf("permissions are too weak")
+		return "", nil, fmt.Errorf("permissions are too weak")
 	}
 
 	f, err := os.Open(keyfile)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 
 	b, err := io.ReadAll(f)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 
 	addr, err := saltyim.GetIdentity(saltyim.WithIdentityBytes(b))
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 
-	return addr.Key().Private(), nil
+	return addr.Addr().String(), addr.Key().Private(), nil
 }
 
 func fetchKey(to string) (ed25519.PublicKey, error) {
@@ -436,9 +460,10 @@ func fetchKey(to string) (ed25519.PublicKey, error) {
 	return addr.Key().Bytes(), nil
 }
 
-func sessionhash(from, to string) string {
+func sessionhash(self string, id ulid.ULID) string {
 	h := fnv.New128a()
-	fmt.Fprint(h, from, to)
+	fmt.Fprint(h, self)
+	h.Write(id.Entropy())
 	return enc(h.Sum(nil))
 }
 
@@ -446,7 +471,7 @@ func log(a ...any) {
 	fmt.Fprintln(os.Stderr, a...)
 }
 
-func readInputFile(input string, them string) (msg string, name string, err error) {
+func readInputFile(input string) (msg string, err error) {
 	var r io.ReadCloser
 	if input == "stdin" {
 		r = os.Stdin
@@ -462,13 +487,22 @@ func readInputFile(input string, them string) (msg string, name string, err erro
 		err = fmt.Errorf("reading offer from stdin: %w", err)
 		return
 	}
-	msg = strings.TrimPrefix(msg, "ratchet ")
-	name = them
-	if n, m, ok := strings.Cut(msg, " "); ok {
-		name = n
-		msg = m
+	return strings.TrimSpace(msg), nil
+}
+
+func readInputMsg(input string) (id ulid.ULID, msg xochimilco.Msg, err error) {
+	input, err = readInputFile(input)
+	if err != nil {
+		return
 	}
-	msg = strings.TrimSpace(msg)
+	log(input)
+
+	msg, err = xochimilco.Parse(input)
+	if err != nil {
+		return
+	}
+
+	copy(id[:], msg.ID())
 
 	return
 }
@@ -482,23 +516,46 @@ type DiskSessionManager struct {
 func NewSessionManager(path, me string, key ed25519.PrivateKey) *DiskSessionManager {
 	return &DiskSessionManager{me, key, path}
 }
+func (sm *DiskSessionManager) New(them string) (*Session, error) {
+	id, err := ulid.New(ulid.Now(), nil)
+	if err != nil {
+		return nil, err
+	}
+	h := fnv.New128a()
+	fmt.Fprint(h, them)
+	id.SetEntropy(h.Sum(nil)[:10])
+
+	key, err := fetchKey(them)
+	if err != nil {
+		return nil, fmt.Errorf("fetching key for %s: %w", them, err)
+	}
+	return NewSession(id, sm.me, sm.key, them, key), nil
+}
 func (sm *DiskSessionManager) Get(them string) (*Session, error) {
-	sh := sessionhash(sm.me, them)
+	id, err := ulid.New(ulid.Now(), nil)
+	if err != nil {
+		return nil, err
+	}
+	h := fnv.New128a()
+	fmt.Fprint(h, them)
+	id.SetEntropy(h.Sum(nil)[:10])
+
+	s, err := sm.GetID(id)
+	if errors.Is(err, fs.ErrNotExist) {
+		return sm.New(them)
+	}
+
+	return s, err
+}
+func (sm *DiskSessionManager) GetID(id ulid.ULID) (*Session, error) {
+	sh := sessionhash(sm.me, id)
 	filename := filepath.Join(sm.path, sh)
 
+	log("READ: ", filename)
 	fd, err := os.Stat(filename)
-	if err != nil && !os.IsNotExist(err) {
+	if err != nil {
 		return nil, fmt.Errorf("stat: %w", err)
 	}
-
-	if os.IsNotExist(err) {
-		key, err := fetchKey(them)
-		if err != nil {
-			return nil, fmt.Errorf("fetching key for %s: %w", them, err)
-		}
-		return NewSession(sm.key, them, key), nil
-	}
-
 	if fd.Mode()&0066 != 0 {
 		return nil, fmt.Errorf("permissions are too weak")
 	}
@@ -517,9 +574,10 @@ func (sm *DiskSessionManager) Get(them string) (*Session, error) {
 	return sess, err
 }
 func (sm *DiskSessionManager) Put(sess *Session) error {
-	sh := sessionhash(sm.me, sess.Name)
+	sh := sessionhash(sm.me, toULID(sess.LocalUUID))
 	filename := filepath.Join(sm.path, sh)
 
+	log("SAVE: ", filename)
 	err := os.MkdirAll(filepath.Dir(filename), 0700)
 	if err != nil {
 		return err
@@ -542,7 +600,15 @@ func (sm *DiskSessionManager) Put(sess *Session) error {
 	return fp.Close()
 }
 func (sm *DiskSessionManager) Delete(sess *Session) error {
-	sh := sessionhash(sm.me, sess.Name)
+	u := ulid.ULID{}
+	copy(u[:], sess.LocalUUID)
+	sh := sessionhash(sm.me, u)
 	filename := filepath.Join(sm.path, sh)
+	log("REMOVE:", filename)
 	return os.Remove(filename)
+}
+func toULID(b []byte) ulid.ULID {
+	var id ulid.ULID
+	copy(id[:], b)
+	return id
 }
