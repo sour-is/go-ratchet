@@ -132,11 +132,11 @@ func (sess *Session) Offer() (offerMsg string, err error) {
 	sess.spkPriv = spkPriv
 
 	offer := offerMessage{
+		uuid:  sess.LocalUUID,
+		nick:  []byte(sess.Me),
 		idKey: sess.IdentityKey.Public().(ed25519.PublicKey),
 		spKey: spkPub,
 		spSig: spkSig,
-		uuid:  sess.LocalUUID,
-		nick:  []byte(sess.Me),
 	}
 
 	offerMsg, err = marshalMessage(sessOffer, offer)

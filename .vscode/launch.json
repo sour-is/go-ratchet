@@ -21,7 +21,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "./cmd/ratchet",
-            "args":["recv", "--key", "../../bob.key", "--state", "../../tmp", "--msg", "../../offer.msg"]
+            "args":["recv", "--key", "../../bob.key", "--state", "../../tmp", "--msg-file", "../../offer.msg"]
         },
 
  
@@ -31,7 +31,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "./cmd/ratchet",
-            "args":["recv", "--key", "../../alice.key", "--state", "../../tmp", "--msg", "../../ack.msg"]
+            "args":["recv", "--key", "../../alice.key", "--state", "../../tmp", "--msg-file", "../../ack.msg"]
         },
 
         {
@@ -49,7 +49,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "./cmd/ratchet",
-            "args":["--key", "../../bob.key", "--state", "../../tmp", "--msg", "../../send1.msg", "recv"]
+            "args":["--key", "../../bob.key", "--state", "../../tmp", "--msg-file", "../../send1.msg", "recv"]
         },
 
         {
@@ -58,7 +58,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "./cmd/ratchet",
-            "args":["--key", "../../bob.key", "--state", "../../tmp", "--msg", "../../send1.msg", "send", "alice@sour.is"]
+            "args":["--key", "../../bob.key", "--state", "../../tmp", "--msg-file", "../../send1.msg", "send", "alice@sour.is"]
         }
 
     ]

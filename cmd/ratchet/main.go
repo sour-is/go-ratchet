@@ -1,21 +1,12 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
-	"crypto/ed25519"
-	"encoding/base64"
-	"encoding/gob"
-	"errors"
 	"fmt"
-	"hash/fnv"
-	"io"
-	"io/fs"
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 
 	"git.mills.io/prologic/msgbus"
@@ -32,15 +23,19 @@ var usage = `Rachet Chat.
 Usage:
   ratchet [options] recv
   ratchet [options] (offer|send|close) <them>
+  ratchet [options] chat
+  ratchet [options] ui
 
 Args:
-  <them>           Receiver acct name to use in offer. 
+  <them>             Receiver acct name to use in offer. 
 
 Options:
-  --key <key>      Sender private key [default: ` + xdg.Get(xdg.EnvConfigHome, "rachet/$USER.key") + `]
-  --state <state>  Session state path [default: ` + xdg.Get(xdg.EnvDataHome, "rachet") + `]
-  --msg <msg>      Msg to read in. [default: stdin]
-  --post           Send to msgbus
+  --key <key>        Sender private key [default: ` + xdg.Get(xdg.EnvConfigHome, "rachet/$USER.key") + `]
+  --state <state>    Session state path [default: ` + xdg.Get(xdg.EnvDataHome, "rachet") + `]
+  --msg <msg>        Msg to read in. [default to read Standard Input]
+  --msg-file <file>  File to read input from.
+  --msg-stdin        Read standard input.
+  --post             Send to msgbus
 `
 
 type opts struct {
@@ -49,75 +44,17 @@ type opts struct {
 	Recv  bool `docopt:"recv"`
 	Close bool `docopt:"close"`
 	Chat  bool `docopt:"chat"`
-	Post  bool `docopt:"--post"`
+	UI    bool `docopt:"ui"`
 
 	Them string `docopt:"<them>"`
 
-	Key     string `docopt:"--key"`
-	Session string `docopt:"--session"`
-	State   string `docopt:"--state"`
-	Msg     string `docopt:"--msg"`
-}
-
-type Session struct {
-	Name    string
-	PeerKey ed25519.PublicKey
-
-	*xochimilco.Session
-}
-
-func NewSession(id ulid.ULID, me string, key ed25519.PrivateKey, name string, them ed25519.PublicKey) *Session {
-	sess := &Session{
-		Session: &xochimilco.Session{
-			IdentityKey: key,
-			Me:          me,
-			LocalUUID:   id[:],
-		},
-	}
-	sess.SetPeerKey(name, them)
-	return sess
-}
-func (s *Session) SetPeerKey(name string, p ed25519.PublicKey) {
-	s.Name = name
-	s.PeerKey = p
-	s.Session.VerifyPeer = func(peer ed25519.PublicKey) (valid bool) {
-		return bytes.Equal(peer, p)
-	}
-}
-func (s *Session) MarshalBinary() ([]byte, error) {
-	sess, err := s.Session.MarshalBinary()
-	if err != nil {
-		return nil, err
-	}
-
-	o := struct {
-		Name    string
-		Key     ed25519.PublicKey
-		Session []byte
-	}{Name: s.Name, Key: s.PeerKey, Session: sess}
-
-	var buf bytes.Buffer
-	err = gob.NewEncoder(&buf).Encode(o)
-	return buf.Bytes(), err
-}
-func (s *Session) UnmarshalBinary(b []byte) error {
-	var o struct {
-		Name     string
-		Endpoint []byte
-		Key      ed25519.PublicKey
-		Session  []byte
-	}
-
-	err := gob.NewDecoder(bytes.NewReader(b)).Decode(&o)
-	if err != nil {
-		return err
-	}
-
-	s.Session = &xochimilco.Session{}
-	s.Session.UnmarshalBinary(o.Session)
-	s.SetPeerKey(o.Name, o.Key)
-
-	return err
+	Key      string `docopt:"--key"`
+	Session  string `docopt:"--session"`
+	State    string `docopt:"--state"`
+	Msg      string `docopt:"--msg"`
+	MsgFile  string `docopt:"--msg-file"`
+	MsgStdin bool   `docopt:"--msg-stdin"`
+	Post     bool   `docopt:"--post"`
 }
 
 func main() {
@@ -146,16 +83,17 @@ func run(ctx context.Context, opts opts) error {
 	// log(opts)
 
 	switch {
-	// case opts.Gen:
-	// todo?
-
 	case opts.Offer:
 		me, key, err := readSaltyIdentity(opts.Key)
 		if err != nil {
 			return fmt.Errorf("reading keyfile: %w", err)
 		}
 
-		sm := NewSessionManager(opts.State, me, key)
+		sm, close, err := NewSessionManager(opts.State, me, key)
+		if err != nil {
+			return err
+		}
+		defer close()
 
 		sess, err := sm.New(opts.Them)
 		if err != nil {
@@ -193,14 +131,18 @@ func run(ctx context.Context, opts opts) error {
 			return fmt.Errorf("reading keyfile: %w", err)
 		}
 
-		sm := NewSessionManager(opts.State, me, key)
+		sm, close, err := NewSessionManager(opts.State, me, key)
+		if err != nil {
+			return err
+		}
+		defer close()
 
-		input, err := readInputFile(opts.Msg)
+		input, err := readInput(opts)
 		if err != nil {
 			return fmt.Errorf("reading input: %w", err)
 		}
 
-		sess, err := sm.Get(opts.Them)
+		sess, err := sm.Get(sm.ByName(opts.Them))
 		if err != nil {
 			return fmt.Errorf("read session: %w", err)
 		}
@@ -238,22 +180,30 @@ func run(ctx context.Context, opts opts) error {
 			return fmt.Errorf("reading keyfile: %w", err)
 		}
 
-		sm := NewSessionManager(opts.State, me, key)
+		sm, close, err := NewSessionManager(opts.State, me, key)
+		if err != nil {
+			return err
+		}
+		defer close()
 
-		id, msg, err := readInputMsg(opts.Msg)
+		input, err := readInput(opts)
 		if err != nil {
 			return fmt.Errorf("reading input: %w", err)
+		}
+		id, msg, err := readMsg(input)
+		if err != nil {
+			return fmt.Errorf("reading msg: %w", err)
 		}
 		log("msg session", id.String())
 
 		var sess *Session
 		if offer, ok := msg.(interface{ Nick() string }); ok {
-			sess, err = sm.Get(offer.Nick())
+			sess, err = sm.New(offer.Nick())
 			if err != nil {
 				return fmt.Errorf("get session: %w", err)
 			}
 		} else {
-			sess, err = sm.GetID(id)
+			sess, err = sm.Get(id)
 			if err != nil {
 				return fmt.Errorf("get session: %w", err)
 			}
@@ -305,9 +255,13 @@ func run(ctx context.Context, opts opts) error {
 			return fmt.Errorf("reading keyfile: %w", err)
 		}
 
-		sm := NewSessionManager(opts.State, me, key)
+		sm, close, err := NewSessionManager(opts.State, me, key)
+		if err != nil {
+			return err
+		}
+		defer close()
 
-		sess, err := sm.Get(opts.Them)
+		sess, err := sm.Get(sm.ByName(opts.Them))
 		if err != nil {
 			return fmt.Errorf("read session: %w", err)
 		}
@@ -337,6 +291,14 @@ func run(ctx context.Context, opts opts) error {
 		return nil
 
 	case opts.Chat:
+		var state = struct {
+			offers map[string]xochimilco.Msg
+			chats  map[ulid.ULID]*Session
+		}{
+			offers: make(map[string]xochimilco.Msg),
+			chats:  make(map[ulid.ULID]*Session),
+		}
+
 		me, key, err := readSaltyIdentity(opts.Key)
 		if err != nil {
 			return fmt.Errorf("reading keyfile: %w", err)
@@ -347,8 +309,11 @@ func run(ctx context.Context, opts opts) error {
 			return fmt.Errorf("lookup addr: %w", err)
 		}
 
-		sm := NewSessionManager(opts.State, me, key)
-		_ = sm
+		sm, close, err := NewSessionManager(opts.State, me, key)
+		if err != nil {
+			return err
+		}
+		defer close()
 
 		uri, inbox := saltyim.SplitInbox(addr.Endpoint().String())
 		bus := client.NewClient(uri, nil)
@@ -357,25 +322,38 @@ func run(ctx context.Context, opts opts) error {
 
 		handleFn := func(in *msgbus.Message) error {
 			input := string(in.Payload)
-			if !strings.HasPrefix(input, "ratchet") {
+			if !(strings.HasPrefix(input, "!RAT!") && strings.HasSuffix(input, "!CHT!")) {
 				return nil
 			}
 
-			log(input)
-			id, msg, err := readInputMsg(input)
+			// log(input)
+			id, msg, err := readMsg(input)
 			if err != nil {
-				return err
+				return fmt.Errorf("reading msg: %w", err)
 			}
+			// log("msg session", id.String())
 
-			sess, err := sm.GetID(id)
-			if err != nil {
-				return fmt.Errorf("get session: %w", err)
+			var sess *Session
+			if offer, ok := msg.(interface{ Nick() string }); ok {
+				log("got offer from: ", offer.Nick())
+				state.offers[offer.Nick()] = msg
+				return nil
+			} else {
+				sess, err = sm.Get(id)
+				if err != nil {
+					return nil // no session. ignore.
+				}
+				state.chats[toULID(sess.LocalUUID)] = sess
 			}
+			// log("local session", toULID(sess.LocalUUID).String())
+			// log("remote session", toULID(sess.RemoteUUID).String())
 
 			isEstablished, isClosed, plaintext, err := sess.ReceiveMsg(msg)
 			if err != nil {
 				return fmt.Errorf("session receive: %w", err)
 			}
+			// log("(updated) remote session", toULID(sess.RemoteUUID).String())
+
 			err = sm.Put(sess)
 			if err != nil {
 				return err
@@ -388,7 +366,7 @@ func run(ctx context.Context, opts opts) error {
 			case isEstablished:
 				log("GOT: session established with ", sess.Name, "...")
 				if len(plaintext) > 0 {
-					fmt.Println(string(plaintext))
+					// fmt.Println(string(plaintext))
 					if opts.Post {
 						addr, err := saltyim.LookupAddr(sess.Name)
 						if err != nil {
@@ -403,7 +381,6 @@ func run(ctx context.Context, opts opts) error {
 				}
 			default:
 				log("GOT: ", sess.Name, ">", string(plaintext))
-
 			}
 
 			return nil
@@ -412,6 +389,10 @@ func run(ctx context.Context, opts opts) error {
 		s := bus.Subscribe(inbox, 0, handleFn)
 		return s.Run(ctx)
 
+	case opts.UI:
+
+		return nil
+
 	default:
 		log(usage)
 	}
@@ -419,196 +400,8 @@ func run(ctx context.Context, opts opts) error {
 	return nil
 }
 
-func enc(b []byte) string {
-	return base64.RawURLEncoding.EncodeToString(b)
-}
-func readSaltyIdentity(keyfile string) (string, ed25519.PrivateKey, error) {
-	fd, err := os.Stat(keyfile)
-	if err != nil {
-		return "", nil, err
-	}
-
-	if fd.Mode()&0066 != 0 {
-		return "", nil, fmt.Errorf("permissions are too weak")
-	}
-
-	f, err := os.Open(keyfile)
-	if err != nil {
-		return "", nil, err
-	}
-
-	b, err := io.ReadAll(f)
-	if err != nil {
-		return "", nil, err
-	}
-
-	addr, err := saltyim.GetIdentity(saltyim.WithIdentityBytes(b))
-	if err != nil {
-		return "", nil, err
-	}
-
-	return addr.Addr().String(), addr.Key().Private(), nil
-}
-
-func fetchKey(to string) (ed25519.PublicKey, error) {
-	log("fetch key: ", to)
-	addr, err := saltyim.LookupAddr(to)
-	if err != nil {
-		return nil, err
-	}
-
-	return addr.Key().Bytes(), nil
-}
-
-func sessionhash(self string, id ulid.ULID) string {
-	h := fnv.New128a()
-	fmt.Fprint(h, self)
-	h.Write(id.Entropy())
-	return enc(h.Sum(nil))
-}
-
 func log(a ...any) {
+//	fmt.Fprint(os.Stderr, "\033[1A\r\033[2K")
 	fmt.Fprintln(os.Stderr, a...)
-}
-
-func readInputFile(input string) (msg string, err error) {
-	var r io.ReadCloser
-	if input == "stdin" {
-		r = os.Stdin
-	} else {
-		r, err = os.Open(input)
-		if err != nil {
-			return
-		}
-	}
-
-	msg, err = bufio.NewReader(r).ReadString('\n')
-	if err != nil {
-		err = fmt.Errorf("reading offer from stdin: %w", err)
-		return
-	}
-	return strings.TrimSpace(msg), nil
-}
-
-func readInputMsg(input string) (id ulid.ULID, msg xochimilco.Msg, err error) {
-	input, err = readInputFile(input)
-	if err != nil {
-		return
-	}
-	log(input)
-
-	msg, err = xochimilco.Parse(input)
-	if err != nil {
-		return
-	}
-
-	copy(id[:], msg.ID())
-
-	return
-}
-
-type DiskSessionManager struct {
-	me   string
-	key  ed25519.PrivateKey
-	path string
-}
-
-func NewSessionManager(path, me string, key ed25519.PrivateKey) *DiskSessionManager {
-	return &DiskSessionManager{me, key, path}
-}
-func (sm *DiskSessionManager) New(them string) (*Session, error) {
-	id, err := ulid.New(ulid.Now(), nil)
-	if err != nil {
-		return nil, err
-	}
-	h := fnv.New128a()
-	fmt.Fprint(h, them)
-	id.SetEntropy(h.Sum(nil)[:10])
-
-	key, err := fetchKey(them)
-	if err != nil {
-		return nil, fmt.Errorf("fetching key for %s: %w", them, err)
-	}
-	return NewSession(id, sm.me, sm.key, them, key), nil
-}
-func (sm *DiskSessionManager) Get(them string) (*Session, error) {
-	id, err := ulid.New(ulid.Now(), nil)
-	if err != nil {
-		return nil, err
-	}
-	h := fnv.New128a()
-	fmt.Fprint(h, them)
-	id.SetEntropy(h.Sum(nil)[:10])
-
-	s, err := sm.GetID(id)
-	if errors.Is(err, fs.ErrNotExist) {
-		return sm.New(them)
-	}
-
-	return s, err
-}
-func (sm *DiskSessionManager) GetID(id ulid.ULID) (*Session, error) {
-	sh := sessionhash(sm.me, id)
-	filename := filepath.Join(sm.path, sh)
-
-	log("READ: ", filename)
-	fd, err := os.Stat(filename)
-	if err != nil {
-		return nil, fmt.Errorf("stat: %w", err)
-	}
-	if fd.Mode()&0066 != 0 {
-		return nil, fmt.Errorf("permissions are too weak")
-	}
-
-	f, err := os.Open(filename)
-	if err != nil {
-		return nil, fmt.Errorf("open %w", err)
-	}
-	b, err := io.ReadAll(f)
-	if err != nil {
-		return nil, fmt.Errorf("read %d bytes: %w", len(b), err)
-	}
-
-	sess := &Session{}
-	err = sess.UnmarshalBinary(b)
-	return sess, err
-}
-func (sm *DiskSessionManager) Put(sess *Session) error {
-	sh := sessionhash(sm.me, toULID(sess.LocalUUID))
-	filename := filepath.Join(sm.path, sh)
-
-	log("SAVE: ", filename)
-	err := os.MkdirAll(filepath.Dir(filename), 0700)
-	if err != nil {
-		return err
-	}
-
-	fp, err := os.OpenFile(filename, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0600)
-	if err != nil {
-		return err
-	}
-
-	b, err := sess.MarshalBinary()
-	if err != nil {
-		return err
-	}
-
-	_, err = fp.Write(b)
-	if err != nil {
-		return err
-	}
-	return fp.Close()
-}
-func (sm *DiskSessionManager) Delete(sess *Session) error {
-	u := ulid.ULID{}
-	copy(u[:], sess.LocalUUID)
-	sh := sessionhash(sm.me, u)
-	filename := filepath.Join(sm.path, sh)
-	log("REMOVE:", filename)
-	return os.Remove(filename)
-}
-func toULID(b []byte) ulid.ULID {
-	var id ulid.ULID
-	copy(id[:], b)
-	return id
+	fmt.Fprint(os.Stderr, ">")
 }
