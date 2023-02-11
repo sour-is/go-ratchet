@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -12,10 +14,8 @@ import (
 	"git.mills.io/prologic/msgbus"
 	"git.mills.io/prologic/msgbus/client"
 	"github.com/docopt/docopt-go"
-	"github.com/oklog/ulid/v2"
 	"go.mills.io/saltyim"
 
-	"github.com/sour-is/xochimilco"
 	"github.com/sour-is/xochimilco/cmd/ratchet/xdg"
 )
 
@@ -291,14 +291,6 @@ func run(ctx context.Context, opts opts) error {
 		return nil
 
 	case opts.Chat:
-		var state = struct {
-			offers map[string]xochimilco.Msg
-			chats  map[ulid.ULID]*Session
-		}{
-			offers: make(map[string]xochimilco.Msg),
-			chats:  make(map[ulid.ULID]*Session),
-		}
-
 		me, key, err := readSaltyIdentity(opts.Key)
 		if err != nil {
 			return fmt.Errorf("reading keyfile: %w", err)
@@ -318,41 +310,189 @@ func run(ctx context.Context, opts opts) error {
 		uri, inbox := saltyim.SplitInbox(addr.Endpoint().String())
 		bus := client.NewClient(uri, nil)
 
+		go func() {
+			var session *Session
+			scanner := bufio.NewScanner(os.Stdin)
+
+			prompt := func() bool {
+				if session == nil {
+					fmt.Print(" none > ")
+				} else {
+					fmt.Print(session.Name, " ", toULID(session.LocalUUID), " > ")
+				}
+				return scanner.Scan()
+			}
+
+			for prompt() {
+				err := scanner.Err()
+				if err != nil {
+					log(err)
+					break
+				}
+
+				input := scanner.Text()
+
+				input = strings.TrimSpace(input)
+				if input == "" {
+					continue
+				}
+
+				if strings.HasPrefix(input, "/chat") {
+					sp := strings.Fields(input)
+					if len(sp) < 2 {
+						log("usage: /chat|close username")
+						for k, v := range sm.sessions {
+							log("sess: ", k, v)
+						}
+						continue
+					}
+
+					session, err = sm.Get(sm.ByName(sp[1]))
+					if err != nil && errors.Is(err, os.ErrNotExist) {
+						session, err = sm.New(sp[1])
+						if err != nil {
+							log(err)
+							continue
+						}
+						msg, err := session.Offer()
+						if err != nil {
+							log(err)
+							continue
+						}
+
+						fmt.Printf("\033[1A\r\033[2K**%s** offer chat...\n", sm.me)
+						_, err = http.DefaultClient.Post(session.Endpoint, "text/plain", strings.NewReader(msg))
+						if err != nil {
+							log(err)
+						}
+
+						err = sm.Put(session)
+						if err != nil {
+							log(err)
+						}
+						continue
+					}
+					if err != nil {
+						log(err)
+						continue
+					}
+					if len(session.PendingAck) > 0 {
+						log("sending ack...", session.Endpoint)
+						_, err = http.DefaultClient.Post(session.Endpoint, "text/plain", strings.NewReader(session.PendingAck))
+						if err != nil {
+							log(err)
+							continue
+						}
+						session.PendingAck = ""
+					}
+					err = sm.Put(session)
+					if err != nil {
+						log(err)
+					}
+
+					log(session)
+					continue
+				}
+				if strings.HasPrefix(input, "/close") {
+					sp := strings.Fields(input)
+
+					if len(sp) > 1 {
+						session, err = sm.Get(sm.ByName(sp[1]))
+						if err != nil {
+							log(err)
+							continue
+						}
+					}
+					if session == nil {
+						continue
+					}
+
+					msg, err := session.Close()
+					if err != nil {
+						log(err)
+						continue
+					}
+
+					fmt.Printf("\033[1A\r\033[2K<%s> %s\n", sm.me, input)
+					_, err = http.DefaultClient.Post(session.Endpoint, "text/plain", strings.NewReader(msg))
+					if err != nil {
+						log(err)
+					}
+
+					err = sm.Delete(session)
+					if err != nil {
+						log(err)
+					}
+
+					session = nil
+					continue
+				}
+
+				if session == nil {
+					log("no session")
+					log("usage: /chat username")
+					continue
+				}
+
+				msg, err := session.Send([]byte(input))
+				if err != nil {
+					log(err)
+					continue
+				}
+
+				fmt.Printf("\033[1A\r\033[2K<%s> %s\n", sm.me, input)
+				_, err = http.DefaultClient.Post(session.Endpoint, "text/plain", strings.NewReader(msg))
+				if err != nil {
+					log(err)
+				}
+
+				err = sm.Put(session)
+				if err != nil {
+					log(err)
+					continue
+				}
+			}
+		}()
+
 		log("listen to", uri, inbox)
 
 		handleFn := func(in *msgbus.Message) error {
+
 			input := string(in.Payload)
 			if !(strings.HasPrefix(input, "!RAT!") && strings.HasSuffix(input, "!CHT!")) {
 				return nil
 			}
 
-			// log(input)
 			id, msg, err := readMsg(input)
 			if err != nil {
 				return fmt.Errorf("reading msg: %w", err)
 			}
-			// log("msg session", id.String())
+			log("msg session", id.String())
 
 			var sess *Session
 			if offer, ok := msg.(interface{ Nick() string }); ok {
-				log("got offer from: ", offer.Nick())
-				state.offers[offer.Nick()] = msg
-				return nil
+				sess, err = sm.New(offer.Nick())
+				if err != nil {
+					return fmt.Errorf("get session: %w", err)
+				}
 			} else {
 				sess, err = sm.Get(id)
-				if err != nil {
-					return nil // no session. ignore.
+				if errors.Is(err, os.ErrNotExist) {
+					log("no sesson", id)
+					return nil
 				}
-				state.chats[toULID(sess.LocalUUID)] = sess
+				if err != nil {
+					return fmt.Errorf("get session: %w", err)
+				}
 			}
-			// log("local session", toULID(sess.LocalUUID).String())
-			// log("remote session", toULID(sess.RemoteUUID).String())
+			log("local session", toULID(sess.LocalUUID).String())
+			log("remote session", toULID(sess.RemoteUUID).String())
 
 			isEstablished, isClosed, plaintext, err := sess.ReceiveMsg(msg)
 			if err != nil {
 				return fmt.Errorf("session receive: %w", err)
 			}
-			// log("(updated) remote session", toULID(sess.RemoteUUID).String())
+			log("(updated) remote session", toULID(sess.RemoteUUID).String())
 
 			err = sm.Put(sess)
 			if err != nil {
@@ -364,21 +504,7 @@ func run(ctx context.Context, opts opts) error {
 				log("GOT: closing session...")
 				return sm.Delete(sess)
 			case isEstablished:
-				log("GOT: session established with ", sess.Name, "...")
-				if len(plaintext) > 0 {
-					// fmt.Println(string(plaintext))
-					if opts.Post {
-						addr, err := saltyim.LookupAddr(sess.Name)
-						if err != nil {
-							return err
-						}
-
-						_, err = http.DefaultClient.Post(addr.Endpoint().String(), "text/plain", bytes.NewReader(plaintext))
-						if err != nil {
-							return err
-						}
-					}
-				}
+				log("GOT: session established with ", sess.Name, "...", sess.Endpoint)
 			default:
 				log("GOT: ", sess.Name, ">", string(plaintext))
 			}
@@ -386,7 +512,7 @@ func run(ctx context.Context, opts opts) error {
 			return nil
 		}
 
-		s := bus.Subscribe(inbox, 0, handleFn)
+		s := bus.Subscribe(inbox, -1, handleFn)
 		return s.Run(ctx)
 
 	case opts.UI:
@@ -401,7 +527,7 @@ func run(ctx context.Context, opts opts) error {
 }
 
 func log(a ...any) {
-//	fmt.Fprint(os.Stderr, "\033[1A\r\033[2K")
+	//	fmt.Fprint(os.Stderr, "\033[1A\r\033[2K")
 	fmt.Fprintln(os.Stderr, a...)
 	fmt.Fprint(os.Stderr, ">")
 }

@@ -14,24 +14,29 @@ import (
 
 	"github.com/oklog/ulid/v2"
 	"github.com/sour-is/xochimilco"
+	"go.mills.io/saltyim"
 )
 
 type Session struct {
-	Name    string
-	PeerKey ed25519.PublicKey
+	Name     string
+	PeerKey  ed25519.PublicKey
+	Endpoint string
+
+	PendingAck string
 
 	*xochimilco.Session
 }
 
-func NewSession(id ulid.ULID, me string, key ed25519.PrivateKey, name string, them ed25519.PublicKey) *Session {
+func NewSession(id ulid.ULID, me string, key ed25519.PrivateKey, name string, them *saltyim.Addr) *Session {
 	sess := &Session{
+		Endpoint: them.Endpoint().String(),
 		Session: &xochimilco.Session{
 			IdentityKey: key,
 			Me:          me,
 			LocalUUID:   id[:],
 		},
 	}
-	sess.SetPeerKey(name, them)
+	sess.SetPeerKey(name, them.Key().Bytes())
 	return sess
 }
 func (s *Session) SetPeerKey(name string, p ed25519.PublicKey) {
@@ -48,10 +53,18 @@ func (s *Session) MarshalBinary() ([]byte, error) {
 	}
 
 	o := struct {
-		Name    string
-		Key     ed25519.PublicKey
-		Session []byte
-	}{Name: s.Name, Key: s.PeerKey, Session: sess}
+		Name       string
+		Key        ed25519.PublicKey
+		Endpoint   string
+		PendingAck string
+		Session    []byte
+	}{
+		Name:       s.Name,
+		Key:        s.PeerKey,
+		Endpoint:   s.Endpoint,
+		Session:    sess,
+		PendingAck: s.PendingAck,
+	}
 
 	var buf bytes.Buffer
 	err = gob.NewEncoder(&buf).Encode(o)
@@ -59,10 +72,11 @@ func (s *Session) MarshalBinary() ([]byte, error) {
 }
 func (s *Session) UnmarshalBinary(b []byte) error {
 	var o struct {
-		Name     string
-		Endpoint []byte
-		Key      ed25519.PublicKey
-		Session  []byte
+		Name       string
+		Endpoint   string
+		Key        ed25519.PublicKey
+		PendingAck string
+		Session    []byte
 	}
 
 	err := gob.NewDecoder(bytes.NewReader(b)).Decode(&o)
@@ -73,8 +87,17 @@ func (s *Session) UnmarshalBinary(b []byte) error {
 	s.Session = &xochimilco.Session{}
 	s.Session.UnmarshalBinary(o.Session)
 	s.SetPeerKey(o.Name, o.Key)
+	s.Endpoint = o.Endpoint
+	s.PendingAck = o.PendingAck
 
 	return err
+}
+func (s *Session) ReceiveMsg(msg xochimilco.Msg) (isEstablished, isClosed bool, plaintext []byte, err error) {
+	isEstablished, isClosed, plaintext, err = s.Session.ReceiveMsg(msg)
+	if isEstablished {
+		s.PendingAck = string(plaintext)
+	}
+	return
 }
 
 type DiskSessionManager struct {
@@ -85,7 +108,7 @@ type DiskSessionManager struct {
 }
 
 func NewSessionManager(path, me string, key ed25519.PrivateKey) (*DiskSessionManager, func() error, error) {
-	dm := &DiskSessionManager{me, key, path,  make(map[string]ulid.ULID)}
+	dm := &DiskSessionManager{me, key, path, make(map[string]ulid.ULID)}
 	return dm, dm.Close, dm.Load()
 }
 func (sm *DiskSessionManager) ByName(name string) ulid.ULID {
@@ -97,11 +120,11 @@ func (sm *DiskSessionManager) ByName(name string) ulid.ULID {
 }
 func (sm *DiskSessionManager) New(them string) (*Session, error) {
 	id := sm.ByName(them)
-	key, err := fetchKey(them)
+	addr, err := fetchKey(them)
 	if err != nil {
 		return nil, fmt.Errorf("fetching key for %s: %w", them, err)
 	}
-	return NewSession(id, sm.me, sm.key, them, key), nil
+	return NewSession(id, sm.me, sm.key, them, addr), nil
 }
 func (sm *DiskSessionManager) Get(id ulid.ULID) (*Session, error) {
 	sh := sessionhash(sm.me, id)
@@ -133,7 +156,7 @@ func (sm *DiskSessionManager) Put(sess *Session) error {
 	sh := sessionhash(sm.me, toULID(sess.LocalUUID))
 	filename := filepath.Join(sm.path, sh)
 
-	log("SAVE: ", filename)
+	// log("SAVE: ", filename)
 	err := os.MkdirAll(filepath.Dir(filename), 0700)
 	if err != nil {
 		return err
@@ -194,7 +217,6 @@ func (sm *DiskSessionManager) Load() error {
 
 	return nil
 }
-
 func (sm *DiskSessionManager) Close() error {
 	fp, err := os.OpenFile(filepath.Join(sm.path, "sess-"+sm.me+".json"), os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {

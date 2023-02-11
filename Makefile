@@ -44,9 +44,9 @@ run:
 
 
 chat-bob:
-	go run ./cmd/ratchet --key bob.key --state ./tmp --post chat 
+	go build ./cmd/ratchet; ./ratchet --key bob.key --state ./tmp --post chat 
 chat-alice:
-	go run ./cmd/ratchet --key alice.key --state ./tmp --post chat 
+	go build ./cmd/ratchet; ./ratchet --key alice.key --state ./tmp --post chat 
 
 offer-bob:
 	go run ./cmd/ratchet offer bob@sour.is --key alice.key --state ./tmp --post

@@ -77,12 +77,13 @@ func readSaltyIdentity(keyfile string) (string, ed25519.PrivateKey, error) {
 	return addr.Addr().String(), addr.Key().Private(), nil
 }
 
-func fetchKey(to string) (ed25519.PublicKey, error) {
+func fetchKey(to string) (*saltyim.Addr, error) {
 	log("fetch key: ", to)
 	addr, err := saltyim.LookupAddr(to)
 	if err != nil {
 		return nil, err
 	}
+	log(addr.Endpoint())
 
-	return addr.Key().Bytes(), nil
+	return addr, nil
 }
