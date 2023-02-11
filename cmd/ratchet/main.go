@@ -433,6 +433,7 @@ func run(ctx context.Context, opts opts) error {
 					log("usage: /chat username")
 					continue
 				}
+				session, _ = sm.Get(toULID(session.LocalUUID))
 
 				msg, err := session.Send([]byte(input))
 				if err != nil {
