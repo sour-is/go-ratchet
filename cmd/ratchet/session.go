@@ -237,12 +237,14 @@ func (sm *DiskSessionManager) Close() error {
 
 	return json.NewEncoder(fp).Encode(data)
 }
-type pair[K, V any] struct{
+
+type pair[K, V any] struct {
 	Name K
-	ID V
+	ID   V
 }
+
 func (sm *DiskSessionManager) Sessions() []pair[string, ulid.ULID] {
-	lis := make([]pair[string,ulid.ULID], len(sm.sessions))
+	lis := make([]pair[string, ulid.ULID], 0, len(sm.sessions))
 	for k, v := range sm.sessions {
 		lis = append(lis, pair[string, ulid.ULID]{k, v})
 	}

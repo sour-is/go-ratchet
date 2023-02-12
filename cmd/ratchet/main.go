@@ -98,8 +98,8 @@ func run(ctx context.Context, opts opts) error {
 		if err != nil {
 			return fmt.Errorf("read session: %w", err)
 		}
-		log("local session", toULID(sess.LocalUUID).String())
-		log("remote session", toULID(sess.RemoteUUID).String())
+		// log("local session", toULID(sess.LocalUUID).String())
+		// log("remote session", toULID(sess.RemoteUUID).String())
 		msg, err := sess.Offer()
 		if err != nil {
 			return err
@@ -145,9 +145,9 @@ func run(ctx context.Context, opts opts) error {
 		if err != nil {
 			return fmt.Errorf("read session: %w", err)
 		}
-		log("me:", me, "send:", opts.Them)
-		log("local session", toULID(sess.LocalUUID).String())
-		log("remote session", toULID(sess.RemoteUUID).String())
+		// log("me:", me, "send:", opts.Them)
+		// log("local session", toULID(sess.LocalUUID).String())
+		// log("remote session", toULID(sess.RemoteUUID).String())
 
 		msg, err := sess.Send([]byte(input))
 		if err != nil {
@@ -207,8 +207,8 @@ func run(ctx context.Context, opts opts) error {
 				return fmt.Errorf("get session: %w", err)
 			}
 		}
-		log("local session", toULID(sess.LocalUUID).String())
-		log("remote session", toULID(sess.RemoteUUID).String())
+		// log("local session", toULID(sess.LocalUUID).String())
+		// log("remote session", toULID(sess.RemoteUUID).String())
 
 		isEstablished, isClosed, plaintext, err := sess.ReceiveMsg(msg)
 		if err != nil {
@@ -348,7 +348,7 @@ func (svc *service) Handle(in *msgbus.Message) error {
 	if err != nil {
 		return fmt.Errorf("reading msg: %w", err)
 	}
-	log("msg session", id.String())
+	// log("msg session", id.String())
 
 	return svc.sm.Use(ctx, func(ctx context.Context, sm SessionManager) error {
 		var sess *Session
@@ -368,14 +368,14 @@ func (svc *service) Handle(in *msgbus.Message) error {
 				return fmt.Errorf("get session: %w", err)
 			}
 		}
-		log("local session", toULID(sess.LocalUUID).String())
-		log("remote session", toULID(sess.RemoteUUID).String())
+		// log("local session", toULID(sess.LocalUUID).String())
+		// log("remote session", toULID(sess.RemoteUUID).String())
 
 		isEstablished, isClosed, plaintext, err := sess.ReceiveMsg(msg)
 		if err != nil {
 			return fmt.Errorf("session receive: %w", err)
 		}
-		log("(updated) remote session", toULID(sess.RemoteUUID).String())
+		// log("(updated) remote session", toULID(sess.RemoteUUID).String())
 
 		err = sm.Put(sess)
 		if err != nil {
@@ -389,7 +389,8 @@ func (svc *service) Handle(in *msgbus.Message) error {
 		case isEstablished:
 			log("GOT: session established with ", sess.Name, "...", sess.Endpoint)
 		default:
-			log("GOT: ", sess.Name, ">", string(plaintext))
+			fmt.Printf("\n\033[1A\r\033[2K<%s> %s\n", sess.Name, string(plaintext))
+			fmt.Printf("%s -> %s >", svc.addr, sess.Name)
 		}
 
 		return nil
@@ -402,9 +403,9 @@ func (svc *service) Interactive(ctx context.Context, me string) {
 
 	prompt := func() bool {
 		if them == "" {
-			fmt.Print(" none > ")
+			fmt.Printf("%s -> none  > ", me)
 		} else {
-			fmt.Print(them, " > ")
+			fmt.Printf("%s -> %s >", me, them)
 		}
 		return scanner.Scan()
 	}
@@ -459,7 +460,7 @@ func (svc *service) Interactive(ctx context.Context, me string) {
 func (svc *service) doChat(ctx context.Context, me string, them *string, input string) error {
 	return svc.sm.Use(ctx, func(ctx context.Context, sm SessionManager) error {
 		sp := strings.Fields(input)
-		if len(sp) < 2 {
+		if len(sp) <= 1 {
 			log("usage: /chat|close username")
 			for _, p := range sm.Sessions() {
 				log("sess: ", p.Name, p.ID)
@@ -467,9 +468,9 @@ func (svc *service) doChat(ctx context.Context, me string, them *string, input s
 			return nil
 		}
 
-		session, err := sm.Get(sm.ByName(*them))
+		session, err := sm.Get(sm.ByName(sp[1]))
 		if err != nil && errors.Is(err, os.ErrNotExist) {
-			session, err = sm.New(*them)
+			session, err = sm.New(sp[1])
 			if err != nil {
 				return err
 			}
@@ -488,6 +489,8 @@ func (svc *service) doChat(ctx context.Context, me string, them *string, input s
 			if err != nil {
 				return err
 			}
+
+			*them = sp[1]
 			return nil
 		}
 		if err != nil {
@@ -496,7 +499,7 @@ func (svc *service) doChat(ctx context.Context, me string, them *string, input s
 		*them = sp[1]
 
 		if len(session.PendingAck) > 0 {
-			log("sending ack...", session.Endpoint)
+			// log("sending ack...", session.Endpoint)
 			_, err = http.DefaultClient.Post(session.Endpoint, "text/plain", strings.NewReader(session.PendingAck))
 			if err != nil {
 				return err
@@ -508,7 +511,7 @@ func (svc *service) doChat(ctx context.Context, me string, them *string, input s
 			return err
 		}
 
-		log(session)
+		// log(session)
 		return nil
 	})
 }
