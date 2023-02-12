@@ -166,6 +166,8 @@ func (svc *service) Interactive(ctx context.Context, me, them string) {
 func (svc *service) doChat(ctx context.Context, me string, them *string, input string) error {
 	return svc.sm.Use(ctx, func(ctx context.Context, sm SessionManager) error {
 		sp := strings.Fields(input)
+
+		// handle show list of open sessions
 		if len(sp) <= 1 {
 			log("usage: /chat|close username")
 			for _, p := range sm.Sessions() {
@@ -178,7 +180,12 @@ func (svc *service) doChat(ctx context.Context, me string, them *string, input s
 			return fmt.Errorf("cant racthet with self")
 		}
 
+		*them = sp[1]
+		svc.setPrompt(me, *them)
+
 		session, err := sm.Get(sm.ByName(sp[1]))
+
+		// handle initiating a new chat
 		if err != nil && errors.Is(err, os.ErrNotExist) {
 			session, err = sm.New(sp[1])
 			if err != nil {
@@ -190,41 +197,31 @@ func (svc *service) doChat(ctx context.Context, me string, them *string, input s
 			}
 
 			fmt.Printf("\033[1A\r\033[2K**%s** offer chat...\n", me)
-			_, err = http.DefaultClient.Post(session.Endpoint, "text/plain", strings.NewReader(msg))
+			err = svc.sendMsg(session, msg)
 			if err != nil {
 				return err
 			}
-
 			err = sm.Put(session)
 			if err != nil {
 				return err
 			}
-
-			*them = sp[1]
-			svc.setPrompt(me, *them)
 
 			return nil
 		}
 		if err != nil {
 			return err
 		}
-		*them = sp[1]
-		svc.setPrompt(me, *them)
 
+		// handle a pending ack from offer.
 		if len(session.PendingAck) > 0 {
-			// log("sending ack...", session.Endpoint)
-			_, err = http.DefaultClient.Post(session.Endpoint, "text/plain", strings.NewReader(session.PendingAck))
+			err = svc.sendMsg(session, session.PendingAck)
 			if err != nil {
 				return err
 			}
 			session.PendingAck = ""
-		}
-		err = sm.Put(session)
-		if err != nil {
-			return err
+			return sm.Put(session)
 		}
 
-		// log(session)
 		return nil
 	})
 }
@@ -289,24 +286,26 @@ func (svc *service) doDefault(ctx context.Context, me string, them *string, inpu
 			return err
 		}
 
+		fmt.Printf("\033[1A\r\033[2K<%s> %s\n", me, input)
 		msg, err := session.Send([]byte(input))
 		if err != nil {
 			return err
 		}
 
-		fmt.Printf("\033[1A\r\033[2K<%s> %s\n", me, input)
-		_, err = http.DefaultClient.Post(session.Endpoint, "text/plain", strings.NewReader(msg))
+		err = svc.sendMsg(session, msg)
 		if err != nil {
 			return err
 		}
 
-		err = sm.Put(session)
-		if err != nil {
-			return err
-		}
-
-		return nil
+		return sm.Put(session)
 	})
+}
+func (svc *service) sendMsg(session *Session, msg string) error {
+	_, err := http.DefaultClient.Post(session.Endpoint, "text/plain", strings.NewReader(msg))
+	if err != nil {
+		return err
+	}
+	return nil
 }
 func (svc *service) setPrompt(me, them string) {
 	if them == "" {
