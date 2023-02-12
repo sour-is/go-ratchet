@@ -104,11 +104,12 @@ type DiskSessionManager struct {
 	me       string
 	key      ed25519.PrivateKey
 	path     string
+	pos      int64
 	sessions map[string]ulid.ULID
 }
 
 func NewSessionManager(path, me string, key ed25519.PrivateKey) (*DiskSessionManager, func() error, error) {
-	dm := &DiskSessionManager{me, key, path, make(map[string]ulid.ULID)}
+	dm := &DiskSessionManager{me, key, path, -1, make(map[string]ulid.ULID)}
 	return dm, dm.Close, dm.Load()
 }
 func (sm *DiskSessionManager) ByName(name string) ulid.ULID {
@@ -203,6 +204,7 @@ func (sm *DiskSessionManager) Load() error {
 		Session ulid.ULID
 	}
 	var data struct {
+		Position int64
 		Sessions []item
 	}
 
@@ -211,6 +213,9 @@ func (sm *DiskSessionManager) Load() error {
 		return err
 	}
 
+	if data.Position > 0 {
+		sm.pos = data.Position
+	}
 	for _, v := range data.Sessions {
 		sm.sessions[v.Name] = v.Session
 	}
@@ -218,24 +223,34 @@ func (sm *DiskSessionManager) Load() error {
 	return nil
 }
 func (sm *DiskSessionManager) Close() error {
-	fp, err := os.OpenFile(filepath.Join(sm.path, "sess-"+sm.me+".json"), os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0600)
+	name := filepath.Join(sm.path, "sess-"+sm.me+".json")
+	fp, err := os.OpenFile(name, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		return err
 	}
 	defer fp.Close()
+	defer log("Saved Session Data ", name)
 
 	type item struct {
 		Name    string
 		Session ulid.ULID
 	}
 	var data struct {
+		Position int64
 		Sessions []item
 	}
+	data.Position = sm.pos
 	for k, v := range sm.sessions {
 		data.Sessions = append(data.Sessions, item{k, v})
 	}
 
 	return json.NewEncoder(fp).Encode(data)
+}
+func (sm *DiskSessionManager) Position() int64 {
+	return sm.pos
+}
+func (sm *DiskSessionManager) SetPosition(pos int64) {
+	sm.pos = pos
 }
 
 type pair[K, V any] struct {

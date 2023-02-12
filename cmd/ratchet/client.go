@@ -33,9 +33,14 @@ func NewClient(sm SessionManager, me string, handleFn func(in *msgbus.Message) e
 		return nil, fmt.Errorf("lookup addr: %w", err)
 	}
 
+	var pos int64 = -1
+	if p, ok := sm.(interface{ Position() int64 }); ok {
+		pos = p.Position()
+	}
+
 	uri, inbox := saltyim.SplitInbox(addr.Endpoint().String())
 	bus := client.NewClient(uri, nil)
-	sub := bus.Subscribe(inbox, -1, handleFn)
+	sub := bus.Subscribe(inbox, pos, handleFn)
 
 	return &Client{locker.New(sm), addr, bus, sub}, nil
 }
