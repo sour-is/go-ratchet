@@ -79,7 +79,6 @@ func (svc *service) Handle(in *msgbus.Message) error {
 		switch {
 		case isClosed:
 			log("GOT: closing session...")
-			svc.setPrompt(sess.Me, "")
 			return sm.Delete(sess)
 		case isEstablished:
 			log("GOT: session established with ", sess.Name, "...", sess.Endpoint)
@@ -202,6 +201,8 @@ func (svc *service) doChat(ctx context.Context, me string, them *string, input s
 			}
 
 			*them = sp[1]
+			svc.setPrompt(me, *them)
+
 			return nil
 		}
 		if err != nil {
@@ -261,12 +262,16 @@ func (svc *service) doClose(ctx context.Context, me string, them *string, input 
 			return err
 		}
 
+		if session.Name == *them {
+			*them = ""
+			svc.setPrompt(me, *them)
+		}
+
 		err = sm.Delete(session)
 		if err != nil {
 			return err
 		}
 
-		*them = ""
 		return nil
 	})
 }
@@ -278,6 +283,7 @@ func (svc *service) doDefault(ctx context.Context, me string, them *string, inpu
 		if err != nil {
 			if session == nil {
 				*them = ""
+
 				return nil
 			}
 			return err
