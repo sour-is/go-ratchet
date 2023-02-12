@@ -27,7 +27,7 @@ type Session struct {
 	*xochimilco.Session
 }
 
-func NewSession(id ulid.ULID, me string, key ed25519.PrivateKey, name string, them *saltyim.Addr) *Session {
+func NewSession(id ulid.ULID, me string, key ed25519.PrivateKey, name string, them saltyim.Addr) *Session {
 	sess := &Session{
 		Endpoint: them.Endpoint().String(),
 		Session: &xochimilco.Session{
@@ -236,6 +236,17 @@ func (sm *DiskSessionManager) Close() error {
 	}
 
 	return json.NewEncoder(fp).Encode(data)
+}
+type pair[K, V any] struct{
+	Name K
+	ID V
+}
+func (sm *DiskSessionManager) Sessions() []pair[string, ulid.ULID] {
+	lis := make([]pair[string,ulid.ULID], len(sm.sessions))
+	for k, v := range sm.sessions {
+		lis = append(lis, pair[string, ulid.ULID]{k, v})
+	}
+	return lis
 }
 
 func sessionhash(self string, id ulid.ULID) string {
