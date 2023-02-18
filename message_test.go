@@ -5,9 +5,12 @@
 package xochimilco
 
 import (
+	"crypto/rand"
 	"encoding"
 	"reflect"
 	"testing"
+
+	"golang.org/x/crypto/nacl/box"
 )
 
 func TestMessageMarshall(t *testing.T) {
@@ -81,5 +84,36 @@ func TestMessageUnmarshalInvalid(t *testing.T) {
 		if err == nil {
 			t.Errorf("%s did not error", input)
 		}
+	}
+}
+
+func TestSeal(t *testing.T) {
+	bobPub, bobPriv, err := box.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m := &offerMessage{
+		idKey: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1, 2},
+		spKey: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1, 2},
+		spSig: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1, 2, 3, 4},
+		uuid:  []uint8{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+		nick:  []uint8("bob@sour.is"),
+	}
+	s, err := Seal(m, bobPub[:32])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	joined := make([]byte, 64)
+	copy(joined[:32], bobPriv[:])
+	copy(joined[32:], bobPub[:])
+
+	tm, err := s.Unseal(joined)
+
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(tm, m) {
+		t.Errorf("messages differ, %#v %#v", tm, m)
 	}
 }

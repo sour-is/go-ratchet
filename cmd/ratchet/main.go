@@ -12,6 +12,7 @@ import (
 	"github.com/docopt/docopt-go"
 	"go.mills.io/saltyim"
 
+	"github.com/sour-is/xochimilco"
 	"github.com/sour-is/xochimilco/cmd/ratchet/xdg"
 )
 
@@ -97,7 +98,7 @@ func run(ctx context.Context, opts opts) error {
 		}
 		// log("local session", toULID(sess.LocalUUID).String())
 		// log("remote session", toULID(sess.RemoteUUID).String())
-		msg, err := sess.Offer()
+		msg, err := sess.OfferSealed(sess.PeerKey.X25519PublicKey().Bytes())
 		if err != nil {
 			return err
 		}
@@ -192,8 +193,22 @@ func run(ctx context.Context, opts opts) error {
 		}
 		log("msg session", id.String())
 
+		if sealed, ok := msg.(interface {
+			Unseal([]byte) (xochimilco.Msg, error)
+		}); ok {
+			joined := make([]byte, 64)
+			copy(joined, key.X25519Key().Private())
+			copy(joined[32:], key.X25519Key().Public())
+			msg, err = sealed.Unseal(joined)
+			if err != nil {
+				return err
+			}
+		}
+
 		var sess *Session
-		if offer, ok := msg.(interface{ Nick() string }); ok {
+		if offer, ok := msg.(interface {
+			Nick() string
+		}); ok {
 			sess, err = sm.New(offer.Nick())
 			if err != nil {
 				return fmt.Errorf("get session: %w", err)
@@ -298,7 +313,7 @@ func run(ctx context.Context, opts opts) error {
 		}
 		defer close()
 
-		svc := &service{ctx: ctx}
+		svc := &service{BaseCTX: func() context.Context { return ctx }}
 		svc.Client, err = NewClient(sm, me, svc.Handle)
 		if err != nil {
 			return err

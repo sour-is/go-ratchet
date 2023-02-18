@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"io"
@@ -16,8 +17,8 @@ import (
 )
 
 type service struct {
-	ctx    context.Context
-	prompt string
+	BaseCTX func() context.Context
+	prompt  string
 	*Client
 }
 
@@ -26,9 +27,12 @@ func (svc *service) Run(ctx context.Context, me, them string) error {
 	return svc.Client.Run(ctx)
 }
 func (svc *service) Context() (context.Context, context.CancelFunc) {
-	return context.WithCancel(svc.ctx)
+	ctx := context.Background()
+	if svc.BaseCTX != nil {
+		ctx = svc.BaseCTX()
+	}
+	return context.WithCancel(ctx)
 }
-
 func (svc *service) Handle(in *msgbus.Message) error {
 	ctx, cancel := svc.Context()
 	defer cancel()
@@ -47,11 +51,19 @@ func (svc *service) Handle(in *msgbus.Message) error {
 	return svc.sm.Use(ctx, func(ctx context.Context, sm SessionManager) error {
 		var sess *Session
 
+		// Update session manager position in stream if supported.
 		if pos, ok := sm.(interface{ SetPosition(int64) }); ok {
 			pos.SetPosition(in.ID + 1)
 		}
 
-		if offer, ok := msg.(interface{ Nick() string }); ok {
+		// offer messages have a nick embeded in the payload.
+		if offer, ok := msg.(interface {
+			Nick() string
+			Unseal(ed25519.PrivateKey) bool
+		}); ok {
+			if !offer.Unseal(sm.Identity().X25519Key().Private()) {
+				return fmt.Errorf("unable to unseal offer")
+			}
 			sess, err = sm.New(offer.Nick())
 			if err != nil {
 				return fmt.Errorf("get session: %w", err)
@@ -323,11 +335,9 @@ type ctxReader struct {
 	ctx context.Context
 	up  io.Reader
 }
-
 func NewCtxReader(ctx context.Context, up io.Reader) io.Reader {
 	return &ctxReader{ctx, up}
 }
-
 func (r *ctxReader) Read(b []byte) (int, error) {
 	tick := time.NewTicker(100 * time.Millisecond)
 	for {

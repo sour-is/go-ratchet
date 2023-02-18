@@ -12,6 +12,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"strings"
+
+	"golang.org/x/crypto/nacl/box"
 )
 
 // messageType identifies the message's type resp. its state and desired action.
@@ -37,6 +39,10 @@ const (
 	// A MITM can also send this. However, a MITM can also drop messages.
 	sessClose
 
+	// sessSealed wraps the message into an anonymous nacl box. This
+	// is used for concealing the offer so the nick is not exposed.
+	sessSealed
+
 	// Prefix indicates the beginning of an encoded message.
 	Prefix string = "!RAT!"
 
@@ -44,7 +50,7 @@ const (
 	Suffix string = "!CHT!"
 )
 
-type Msg interface{interface{ ID() []byte }}
+type Msg interface{ interface{ ID() []byte } }
 
 func Parse(in string) (Msg, error) {
 	_, m, err := unmarshalMessage(in)
@@ -84,17 +90,9 @@ func unmarshalMessage(in string) (t messageType, m Msg, err error) {
 		return
 	}
 
-	switch t = messageType(in[len(Prefix)] - '0'); t {
-	case sessOffer:
-		m = new(offerMessage)
-	case sessAck:
-		m = new(ackMessage)
-	case sessData:
-		m = new(dataMessage)
-	case sessClose:
-		m = new(closeMessage)
-	default:
-		err = fmt.Errorf("unsupported message type %d", t)
+	t = messageType(in[len(Prefix)] - '0')
+	m, err = container(t)
+	if err != nil {
 		return
 	}
 
@@ -105,6 +103,24 @@ func unmarshalMessage(in string) (t messageType, m Msg, err error) {
 
 	err = m.(encoding.BinaryUnmarshaler).UnmarshalBinary(data)
 
+	return
+}
+
+func container(t messageType) (m Msg, err error) {
+	switch t {
+	case sessOffer:
+		m = new(offerMessage)
+	case sessAck:
+		m = new(ackMessage)
+	case sessData:
+		m = new(dataMessage)
+	case sessClose:
+		m = new(closeMessage)
+	case sessSealed:
+		m = new(sealedMessage)
+	default:
+		err = fmt.Errorf("unsupported message type %d", t)
+	}
 	return
 }
 
@@ -232,7 +248,7 @@ func (msg *dataMessage) ID() []byte {
 
 func (msg *dataMessage) MarshalBinary() (data []byte, err error) {
 	data = make([]byte, 16+len(msg.payload))
-	
+
 	copy(data[:16], msg.uuid)
 	copy(data[16:], msg.payload)
 
@@ -265,7 +281,7 @@ func (msg *closeMessage) ID() []byte {
 
 func (msg *closeMessage) MarshalBinary() (data []byte, err error) {
 	data = make([]byte, 16+len(msg.payload))
-	
+
 	copy(data[:16], msg.uuid)
 	copy(data[16:], msg.payload)
 
@@ -288,4 +304,71 @@ func (msg *closeMessage) UnmarshalBinary(data []byte) (err error) {
 	}
 
 	return
+}
+
+type sealedMessage []byte
+
+func Seal(m encoding.BinaryMarshaler, k []byte) (out sealedMessage, err error) {
+	var data []byte
+
+	data, err = m.MarshalBinary()
+	if err != nil {
+		return
+	}
+
+	switch m.(type) {
+	case *offerMessage:
+		data = append([]byte{'1'}, data...)
+	case *ackMessage:
+		data = append([]byte{'2'}, data...)
+	case *dataMessage:
+		data = append([]byte{'3'}, data...)
+	case *closeMessage:
+		data = append([]byte{'4'}, data...)
+	default:
+		err = fmt.Errorf("unsupported message type %T", m)
+		return
+	}
+
+	var key [32]byte
+	copy(key[:], k)
+
+	return box.SealAnonymous(nil, data, &key, nil)
+}
+
+func (s sealedMessage) Unseal(k []byte) (m Msg, err error) {
+	var ok bool
+	var data []byte
+	var pub [32]byte
+	var priv [32]byte
+	copy(priv[:], k[:32])
+	copy(pub[:], k[32:])
+	data, ok = box.OpenAnonymous(nil, s, &pub, &priv)
+	if !ok {
+		err = fmt.Errorf("unseal invalid")
+		return
+	}
+
+	m, err = container(messageType(data[0] - '0'))
+	if err != nil {
+		return
+	}
+
+	err = m.(encoding.BinaryUnmarshaler).UnmarshalBinary(data[1:])
+	return
+}
+
+func (s sealedMessage) MarshalBinary() ([]byte, error) {
+	return s, nil
+}
+func (s *sealedMessage) UnmarshalBinary(data []byte) (err error) {
+	if len(data) <= 1 {
+		return fmt.Errorf("sessAck payload MUST be >= 1 byte")
+	}
+	*s = data
+	return nil
+}
+
+func (s sealedMessage) ID() []byte {
+	return nil
 }

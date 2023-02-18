@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/keys-pub/keys"
 	"github.com/oklog/ulid/v2"
 	"github.com/sour-is/xochimilco"
 	"go.mills.io/saltyim"
@@ -19,7 +20,7 @@ import (
 
 type Session struct {
 	Name     string
-	PeerKey  ed25519.PublicKey
+	PeerKey  *keys.EdX25519PublicKey
 	Endpoint string
 
 	PendingAck string
@@ -27,11 +28,12 @@ type Session struct {
 	*xochimilco.Session
 }
 
-func NewSession(id ulid.ULID, me string, key ed25519.PrivateKey, name string, them saltyim.Addr) *Session {
+func NewSession(id ulid.ULID, me string, key *keys.EdX25519Key, name string, them saltyim.Addr) *Session {
 	sess := &Session{
 		Endpoint: them.Endpoint().String(),
+		PeerKey: them.Key(),
 		Session: &xochimilco.Session{
-			IdentityKey: key,
+			IdentityKey: key.Private(),
 			Me:          me,
 			LocalUUID:   id[:],
 		},
@@ -39,9 +41,8 @@ func NewSession(id ulid.ULID, me string, key ed25519.PrivateKey, name string, th
 	sess.SetPeerKey(name, them.Key().Bytes())
 	return sess
 }
-func (s *Session) SetPeerKey(name string, p ed25519.PublicKey) {
+func (s *Session) SetPeerKey(name string, p []byte) {
 	s.Name = name
-	s.PeerKey = p
 	s.Session.VerifyPeer = func(peer ed25519.PublicKey) (valid bool) {
 		return bytes.Equal(peer, p)
 	}
@@ -54,13 +55,13 @@ func (s *Session) MarshalBinary() ([]byte, error) {
 
 	o := struct {
 		Name       string
-		Key        ed25519.PublicKey
+		Key        string
 		Endpoint   string
 		PendingAck string
 		Session    []byte
 	}{
 		Name:       s.Name,
-		Key:        s.PeerKey,
+		Key:        s.PeerKey.String(),
 		Endpoint:   s.Endpoint,
 		Session:    sess,
 		PendingAck: s.PendingAck,
@@ -74,7 +75,7 @@ func (s *Session) UnmarshalBinary(b []byte) error {
 	var o struct {
 		Name       string
 		Endpoint   string
-		Key        ed25519.PublicKey
+		Key        string
 		PendingAck string
 		Session    []byte
 	}
@@ -86,7 +87,15 @@ func (s *Session) UnmarshalBinary(b []byte) error {
 
 	s.Session = &xochimilco.Session{}
 	s.Session.UnmarshalBinary(o.Session)
-	s.SetPeerKey(o.Name, o.Key)
+	id, err := keys.ParseID(o.Key)
+	if err != nil {
+		return err
+	}
+	s.PeerKey, err = keys.NewEdX25519PublicKeyFromID(id)
+	if err != nil {
+		return err
+	}
+	s.SetPeerKey(o.Name, s.PeerKey.Bytes())
 	s.Endpoint = o.Endpoint
 	s.PendingAck = o.PendingAck
 
@@ -99,18 +108,24 @@ func (s *Session) ReceiveMsg(msg xochimilco.Msg) (isEstablished, isClosed bool, 
 	}
 	return
 }
+func (s *Session) Offer() (string, error) {
+	return s.Session.OfferSealed(s.PeerKey.X25519PublicKey().Bytes())
+}
 
 type DiskSessionManager struct {
 	me       string
-	key      ed25519.PrivateKey
+	key      *keys.EdX25519Key
 	path     string
 	pos      int64
 	sessions map[string]ulid.ULID
 }
 
-func NewSessionManager(path, me string, key ed25519.PrivateKey) (*DiskSessionManager, func() error, error) {
+func NewSessionManager(path, me string, key *keys.EdX25519Key) (*DiskSessionManager, func() error, error) {
 	dm := &DiskSessionManager{me, key, path, -1, make(map[string]ulid.ULID)}
 	return dm, dm.Close, dm.Load()
+}
+func (sm *DiskSessionManager) Identity() *keys.EdX25519Key {
+	return sm.key
 }
 func (sm *DiskSessionManager) ByName(name string) ulid.ULID {
 	if u, ok := sm.sessions[name]; ok {

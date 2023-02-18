@@ -123,6 +123,31 @@ func (sess *Session) UnmarshalBinary(b []byte) error {
 // This method MUST be called initially by the active resp. opening party
 // (Alice) once. The other party will hopefully Acknowledge this message.
 func (sess *Session) Offer() (offerMsg string, err error) {
+	offer, err := sess.createOffer()
+	if err != nil {
+		return
+	}
+
+	offerMsg, err = marshalMessage(sessOffer, offer)
+	return
+}
+
+func (sess *Session) OfferSealed(k []byte) (offerMsg string, err error) {
+	offer, err := sess.createOffer()
+	if err != nil {
+		return
+	}
+
+	sealed, err := Seal(offer, k)
+	if err != nil {
+		return
+	}
+
+	offerMsg, err = marshalMessage(sessSealed, sealed)
+	return
+}
+
+func (sess *Session) createOffer() (offer *offerMessage, err error) {
 	spkPub, spkPriv, spkSig, err := x3dh.CreateNewSpk(sess.IdentityKey)
 	if err != nil {
 		return
@@ -131,15 +156,13 @@ func (sess *Session) Offer() (offerMsg string, err error) {
 	sess.spkPub = spkPub
 	sess.spkPriv = spkPriv
 
-	offer := offerMessage{
+	offer = &offerMessage{
 		uuid:  sess.LocalUUID,
 		nick:  []byte(sess.Me),
 		idKey: sess.IdentityKey.Public().(ed25519.PublicKey),
 		spKey: spkPub,
 		spSig: spkSig,
 	}
-
-	offerMsg, err = marshalMessage(sessOffer, offer)
 	return
 }
 

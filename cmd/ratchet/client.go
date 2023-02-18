@@ -6,12 +6,14 @@ import (
 
 	"git.mills.io/prologic/msgbus"
 	"git.mills.io/prologic/msgbus/client"
+	"github.com/keys-pub/keys"
 	"github.com/oklog/ulid/v2"
 	"github.com/sour-is/xochimilco/cmd/ratchet/locker"
 	"go.mills.io/saltyim"
 )
 
 type SessionManager interface {
+	Identity() *keys.EdX25519Key
 	ByName(name string) ulid.ULID
 	New(them string) (*Session, error)
 	Get(id ulid.ULID) (*Session, error)

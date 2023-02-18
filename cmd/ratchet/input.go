@@ -2,12 +2,12 @@ package main
 
 import (
 	"bufio"
-	"crypto/ed25519"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
+	"github.com/keys-pub/keys"
 	"github.com/oklog/ulid/v2"
 	"github.com/sour-is/xochimilco"
 	"go.mills.io/saltyim"
@@ -49,7 +49,7 @@ func readMsg(input string) (id ulid.ULID, msg xochimilco.Msg, err error) {
 	return
 }
 
-func readSaltyIdentity(keyfile string) (string, ed25519.PrivateKey, error) {
+func readSaltyIdentity(keyfile string) (string, *keys.EdX25519Key, error) {
 	fd, err := os.Stat(keyfile)
 	if err != nil {
 		return "", nil, err
@@ -74,7 +74,7 @@ func readSaltyIdentity(keyfile string) (string, ed25519.PrivateKey, error) {
 		return "", nil, err
 	}
 
-	return addr.Addr().String(), addr.Key().Private(), nil
+	return addr.Addr().String(), addr.Key(), nil
 }
 
 func fetchKey(to string) (saltyim.Addr, error) {
