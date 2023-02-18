@@ -21,6 +21,10 @@ type service struct {
 	*Client
 }
 
+func (svc *service) Run(ctx context.Context, me, them string) error {
+	go svc.Interactive(ctx, me, them)
+	return svc.Client.Run(ctx)
+}
 func (svc *service) Context() (context.Context, context.CancelFunc) {
 	return context.WithCancel(svc.ctx)
 }

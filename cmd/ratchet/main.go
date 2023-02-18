@@ -304,9 +304,7 @@ func run(ctx context.Context, opts opts) error {
 			return err
 		}
 
-		go svc.Interactive(ctx, me, opts.Them)
-
-		return svc.Run(ctx)
+		return svc.Run(ctx, me, opts.Them)
 
 	case opts.UI:
 
