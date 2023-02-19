@@ -166,6 +166,12 @@ func (sm *DiskSessionManager) Get(id ulid.ULID) (*Session, error) {
 
 	sess := &Session{}
 	err = sess.UnmarshalBinary(b)
+
+	// session only needs private key during initial handshake.
+	if !sess.Active() {
+		sess.IdentityKey = sm.key.Private()
+	}
+
 	return sess, err
 }
 func (sm *DiskSessionManager) Put(sess *Session) error {

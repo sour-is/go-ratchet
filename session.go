@@ -73,7 +73,6 @@ func (sess *Session) MarshalBinary() ([]byte, error) {
 		LocalUUID    []byte
 		RemoteUUID   []byte
 		Me           string
-		IdentityKey  []byte
 		SpkPub       []byte
 		SpkPriv      []byte
 		DoubleRachet []byte
@@ -81,7 +80,6 @@ func (sess *Session) MarshalBinary() ([]byte, error) {
 		sess.LocalUUID,
 		sess.RemoteUUID,
 		sess.Me,
-		sess.IdentityKey,
 		sess.spkPub,
 		sess.spkPriv,
 		dr,
@@ -95,7 +93,6 @@ func (sess *Session) UnmarshalBinary(b []byte) error {
 		LocalUUID    []byte
 		RemoteUUID   []byte
 		Me           string
-		IdentityKey  []byte
 		SpkPub       []byte
 		SpkPriv      []byte
 		DoubleRachet []byte
@@ -108,7 +105,6 @@ func (sess *Session) UnmarshalBinary(b []byte) error {
 	sess.Me = o.Me
 	sess.LocalUUID = o.LocalUUID
 	sess.RemoteUUID = o.RemoteUUID
-	sess.IdentityKey = o.IdentityKey
 	sess.spkPub = o.SpkPub
 	sess.spkPriv = o.SpkPriv
 	if len(o.DoubleRachet) > 0 {
@@ -116,6 +112,11 @@ func (sess *Session) UnmarshalBinary(b []byte) error {
 		err = sess.doubleRatchet.UnmarshalBinary(o.DoubleRachet)
 	}
 	return err
+}
+
+// Active returns true if the session has been activated.
+func (sess *Session) Active() bool {
+	return sess.doubleRatchet != nil
 }
 
 // Offer to establish an encrypted Session.

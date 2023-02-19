@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"git.mills.io/prologic/msgbus"
+	"github.com/sour-is/xochimilco"
 )
 
 type service struct {
@@ -56,14 +56,22 @@ func (svc *service) Handle(in *msgbus.Message) error {
 			pos.SetPosition(in.ID + 1)
 		}
 
+		if sealed, ok := msg.(interface {
+			Unseal([]byte) (xochimilco.Msg, error)
+		}); ok {
+			joined := make([]byte, 64)
+			copy(joined, sm.Identity().X25519Key().Private())
+			copy(joined[32:], sm.Identity().X25519Key().Public())
+			msg, err = sealed.Unseal(joined)
+			if err != nil {
+				return err
+			}
+		}
+
 		// offer messages have a nick embeded in the payload.
 		if offer, ok := msg.(interface {
 			Nick() string
-			Unseal(ed25519.PrivateKey) bool
 		}); ok {
-			if !offer.Unseal(sm.Identity().X25519Key().Private()) {
-				return fmt.Errorf("unable to unseal offer")
-			}
 			sess, err = sm.New(offer.Nick())
 			if err != nil {
 				return fmt.Errorf("get session: %w", err)
@@ -335,6 +343,7 @@ type ctxReader struct {
 	ctx context.Context
 	up  io.Reader
 }
+
 func NewCtxReader(ctx context.Context, up io.Reader) io.Reader {
 	return &ctxReader{ctx, up}
 }
