@@ -11,6 +11,7 @@ import (
 	"encoding/gob"
 	"fmt"
 
+	"github.com/oklog/ulid"
 	"github.com/sour-is/xochimilco/doubleratchet"
 	"github.com/sour-is/xochimilco/x3dh"
 )
@@ -335,7 +336,7 @@ func (sess *Session) Send(plaintext []byte) (dataMsg string, err error) {
 		return
 	}
 
-	dataMsg, err = marshalMessage(sessData, &dataMessage{sess.RemoteUUID, ciphertext})
+	dataMsg, err = marshalMessage(sessData, &dataMessage{encTime(sess.RemoteUUID), ciphertext})
 	return
 }
 
@@ -348,4 +349,11 @@ func (sess *Session) Close() (closeMsg string, err error) {
 
 	closeMsg, err = marshalMessage(sessClose, &closeMessage{sess.RemoteUUID, []byte{0xff}})
 	return
+}
+
+func encTime(in []byte) []byte {
+	u := ulid.ULID{}
+	copy(u[:], in)
+	u.SetTime(ulid.Now())
+	return u[:]
 }

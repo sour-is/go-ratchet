@@ -14,6 +14,7 @@ import (
 	"github.com/oklog/ulid/v2"
 	"github.com/sour-is/xochimilco"
 	"github.com/sour-is/xochimilco/cmd/ratchet/locker"
+	"go.mills.io/salty"
 	"go.mills.io/saltyim"
 	"golang.org/x/sync/errgroup"
 )
@@ -189,7 +190,25 @@ func (c *Client) Close(ctx context.Context, them string) error {
 		return err
 	})
 }
-func (c *Client) SendSalty(ctx context.Context, them, msg string) error { return nil }
+func (c *Client) SendSalty(ctx context.Context, them, msg string) error {
+	addr, err := saltyim.LookupAddr(them)
+	if err != nil {
+		return err
+	}
+
+	return c.sm.Use(ctx, func(ctx context.Context, sm SessionManager) error {
+		b, err := salty.Encrypt(sm.Identity(), saltyim.PackMessage(c.addr, msg), []string{addr.Key().ID().String()})
+		if err != nil {
+			return fmt.Errorf("error encrypting message to %s: %w", addr, err)
+		}
+	
+		err = saltyim.Send(addr.Endpoint().String(), string(b), addr.Cap())
+		if err != nil {
+			return err
+		}
+		return c.dispatch(ctx, OnSaltySent, nil, them, msg)	
+	})
+}
 
 func (c *Client) Handle(cmd command, fn HandlerFn) {
 	c.hdlr[cmd] = append(c.hdlr[cmd], fn)
@@ -208,6 +227,23 @@ func (c *Client) msgbusHandler(in *msgbus.Message) error {
 	defer cancel()
 
 	input := string(in.Payload)
+
+	if strings.HasPrefix(input, "BEGIN SALTPACK ENCRYPTED MESSAGE.") {
+		return c.sm.Use(ctx, func(ctx context.Context, sm SessionManager) error {
+			// Update session manager position in stream if supported.
+			if pos, ok := sm.(interface{ SetPosition(int64) }); ok {
+				pos.SetPosition(in.ID + 1)
+			}
+
+			msg, _, err := salty.Decrypt(sm.Identity(), []byte(input))
+			if err != nil {
+				return err
+			}
+
+			return c.dispatch(ctx, OnSaltyReceived, nil, "", string(msg))
+		})
+	}
+
 	if !(strings.HasPrefix(input, "!RAT!") && strings.HasSuffix(input, "!CHT!")) {
 		return c.dispatch(ctx, OnOtherReceived, nil, "", input)
 	}
@@ -283,13 +319,13 @@ func (c *Client) msgbusHandler(in *msgbus.Message) error {
 				return err
 			}
 
-			return c.dispatch(ctx, OnSessionClosed, sess.LocalUUID, sess.Name, "")
+			return c.dispatch(ctx, OnSessionClosed, msg.ID(), sess.Name, "")
 		case isEstablished:
 			log("GOT: session established with ", sess.Name, "...", sess.Endpoint)
-			return c.dispatch(ctx, OnSessionStarted, sess.LocalUUID, sess.Name, "")
+			return c.dispatch(ctx, OnSessionStarted, msg.ID(), sess.Name, "")
 		}
 
-		return c.dispatch(ctx, OnMessageReceived, sess.LocalUUID, sess.Name, string(plaintext))
+		return c.dispatch(ctx, OnMessageReceived, msg.ID(), sess.Name, string(plaintext))
 	})
 }
 

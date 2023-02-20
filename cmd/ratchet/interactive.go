@@ -9,6 +9,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"go.yarn.social/lextwt"
 )
 
 type service struct {
@@ -42,15 +44,28 @@ func (svc *service) Interactive(ctx context.Context, me, them string) {
 		fmt.Printf(svc.prompt)
 	})
 	svc.Handle(OnMessageReceived, func(ctx context.Context, sessionID []byte, them, msg string) {
-		fmt.Printf("\n\033[1A\r\033[2K<\033[31m%s\033[0m> %s\n", them, msg)
+		fmt.Printf("\n\033[1A\r\033[2K%s <\033[31m%s\033[0m> %s\n", getTime(sessionID).Format("15:04:05"), them, msg)
 		fmt.Printf(svc.prompt)
 	})
 	svc.Handle(OnMessageSent, func(ctx context.Context, sessionID []byte, them, msg string) {
 		// fmt.Printf("\n\033[1A\r\033[2K<\033[31m%s\033[0m> %s\n", me, msg)
 		// fmt.Printf(svc.prompt)
 	})
-	svc.Handle(OnSaltyReceived, func(ctx context.Context, sessionID []byte, them, msg string) {
-		fmt.Printf("\n\033[1A\r\033[2K<\033[34m%s\033[0m> %s\n", them, msg)
+	svc.Handle(OnSaltySent, func(ctx context.Context, sessionID []byte, them, msg string) {
+		fmt.Printf("\n\033[1A\r\033[2K%s <\033[34m%s\033[0m> %s\n", time.Now().Format("15:04:05"), them, msg)
+	})
+	svc.Handle(OnSaltyReceived, func(ctx context.Context, _ []byte, _, msg string) {
+		s, err := lextwt.ParseSalty(msg)
+		if err != nil {
+			return
+		}
+		switch s := s.(type) {
+		case *lextwt.SaltyEvent:
+			fmt.Printf("\n\033[1A\r\033[2K\033[90m::: salty: %s(%s)\033[0m\n", s.Command, strings.Join(s.Args, ", "))
+		case *lextwt.SaltyText:
+			fmt.Printf("\n\033[1A\r\033[2K%s <\033[34m%s\033[0m> %s\n", s.Timestamp.DateTime().Format("15:04:05"), s.User, s.LiteralText())
+		}
+
 		fmt.Printf(svc.prompt)
 	})
 	svc.Handle(OnOtherReceived, func(ctx context.Context, sessionID []byte, them, msg string) {
@@ -110,6 +125,14 @@ func (svc *service) Interactive(ctx context.Context, me, them string) {
 		}
 		if strings.HasPrefix(input, "/close") {
 			err = svc.doClose(ctx, me, &them, input)
+			if err != nil {
+				log("ERR: ", err)
+			}
+			continue
+		}
+		if strings.HasPrefix(input, "/salty") {
+			target, msg, _ := strings.Cut(strings.TrimPrefix(input, "/salty "), " ")
+			err = svc.SendSalty(ctx, target, msg)
 			if err != nil {
 				log("ERR: ", err)
 			}
@@ -205,4 +228,9 @@ func (r *ctxReader) Read(b []byte) (int, error) {
 			}
 		}
 	}
+}
+
+func getTime(b []byte) time.Time {
+	u := toULID(b)
+	return time.UnixMilli(int64(u.Time()))
 }
