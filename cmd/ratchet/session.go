@@ -31,7 +31,7 @@ type Session struct {
 func NewSession(id ulid.ULID, me string, key *keys.EdX25519Key, name string, them saltyim.Addr) *Session {
 	sess := &Session{
 		Endpoint: them.Endpoint().String(),
-		PeerKey: them.Key(),
+		PeerKey:  them.Key(),
 		Session: &xochimilco.Session{
 			IdentityKey: key.Private(),
 			Me:          me,
@@ -105,6 +105,7 @@ func (s *Session) ReceiveMsg(msg xochimilco.Msg) (isEstablished, isClosed bool, 
 	isEstablished, isClosed, plaintext, err = s.Session.ReceiveMsg(msg)
 	if isEstablished {
 		s.PendingAck = string(plaintext)
+		plaintext = plaintext[:0]
 	}
 	return
 }

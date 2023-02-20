@@ -311,11 +311,12 @@ func run(ctx context.Context, opts opts) error {
 		}
 		defer close()
 
-		svc := &service{BaseCTX: func() context.Context { return ctx }}
-		svc.Client, err = NewClient(sm, me, svc.Handle)
+		svc := &service{}
+		svc.Client, err = NewClient(sm, me)
 		if err != nil {
 			return err
 		}
+		svc.Client.BaseCTX = func() context.Context { return ctx }
 
 		return svc.Run(ctx, me, opts.Them)
 

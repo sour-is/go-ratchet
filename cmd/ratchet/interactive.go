@@ -3,21 +3,16 @@ package main
 import (
 	"bufio"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"syscall"
 	"time"
-
-	"git.mills.io/prologic/msgbus"
-	"github.com/sour-is/xochimilco"
 )
 
 type service struct {
-	BaseCTX func() context.Context
-	prompt  string
+	prompt string
 	*Client
 }
 
@@ -25,93 +20,44 @@ func (svc *service) Run(ctx context.Context, me, them string) error {
 	go svc.Interactive(ctx, me, them)
 	return svc.Client.Run(ctx)
 }
-func (svc *service) Context() (context.Context, context.CancelFunc) {
-	ctx := context.Background()
-	if svc.BaseCTX != nil {
-		ctx = svc.BaseCTX()
-	}
-	return context.WithCancel(ctx)
-}
-func (svc *service) Handle(in *msgbus.Message) error {
-	ctx, cancel := svc.Context()
-	defer cancel()
-
-	input := string(in.Payload)
-	if !(strings.HasPrefix(input, "!RAT!") && strings.HasSuffix(input, "!CHT!")) {
-		return nil
-	}
-
-	id, msg, err := readMsg(input)
-	if err != nil {
-		return fmt.Errorf("reading msg: %w", err)
-	}
-	// log("msg session", id.String())
-
-	return svc.sm.Use(ctx, func(ctx context.Context, sm SessionManager) error {
-		var sess *Session
-
-		// Update session manager position in stream if supported.
-		if pos, ok := sm.(interface{ SetPosition(int64) }); ok {
-			pos.SetPosition(in.ID + 1)
-		}
-
-		if sealed, ok := msg.(interface {
-			Unseal(priv, pub *[32]byte) (m xochimilco.Msg, err error)
-		}); ok {
-			msg, err = sealed.Unseal(
-				sm.Identity().X25519Key().Bytes32(),
-				sm.Identity().X25519Key().PublicKey().Bytes32(),
-			)
-			if err != nil {
-				return err
-			}
-		}
-
-		// offer messages have a nick embeded in the payload.
-		if offer, ok := msg.(interface {
-			Nick() string
-		}); ok {
-			sess, err = sm.New(offer.Nick())
-			if err != nil {
-				return fmt.Errorf("get session: %w", err)
-			}
-		} else {
-			sess, err = sm.Get(id)
-			if errors.Is(err, os.ErrNotExist) {
-				log("no sesson", id)
-				return nil
-			}
-			if err != nil {
-				return fmt.Errorf("get session: %w", err)
-			}
-		}
-
-		isEstablished, isClosed, plaintext, err := sess.ReceiveMsg(msg)
-		if err != nil {
-			return fmt.Errorf("session receive: %w", err)
-		}
-
-		err = sm.Put(sess)
-		if err != nil {
-			return err
-		}
-
-		switch {
-		case isClosed:
-			log("GOT: closing session...")
-			return sm.Delete(sess)
-		case isEstablished:
-			log("GOT: session established with ", sess.Name, "...", sess.Endpoint)
-		default:
-			fmt.Printf("\n\033[1A\r\033[2K<%s> %s\n", sess.Name, string(plaintext))
-			fmt.Printf(svc.prompt)
-		}
-
-		return nil
-	})
-}
 
 func (svc *service) Interactive(ctx context.Context, me, them string) {
+	svc.Handle(OnOfferSent, func(ctx context.Context, sessionID []byte, them, msg string) {
+		fmt.Printf("\n\033[1A\r\033[2K\033[90m::: offer sent %s :::\033[0m\n", them)
+		fmt.Printf(svc.prompt)
+	})
+	svc.Handle(OnOfferReceived, func(ctx context.Context, sessionID []byte, them, msg string) {
+		fmt.Printf("\n\033[1A\r\033[2K\033[90m::: offer from %s :::\033[0m\n", them)
+		fmt.Printf(svc.prompt)
+	})
+	svc.Handle(OnSessionStarted, func(ctx context.Context, sessionID []byte, them, msg string) {
+		fmt.Printf("\n\033[1A\r\033[2K\033[90m::: session started with %s :::\033[0m\n", them)
+		fmt.Printf(svc.prompt)
+	})
+	svc.Handle(OnSessionClosed, func(ctx context.Context, sessionID []byte, target, msg string) {
+		fmt.Printf("\n\033[1A\r\033[2K\033[90m::: session closed with %s :::\033[0m\n", target)
+		if them == target {
+			svc.setPrompt(me, "")
+		}
+		fmt.Printf(svc.prompt)
+	})
+	svc.Handle(OnMessageReceived, func(ctx context.Context, sessionID []byte, them, msg string) {
+		fmt.Printf("\n\033[1A\r\033[2K<\033[31m%s\033[0m> %s\n", them, msg)
+		fmt.Printf(svc.prompt)
+	})
+	svc.Handle(OnMessageSent, func(ctx context.Context, sessionID []byte, them, msg string) {
+		// fmt.Printf("\n\033[1A\r\033[2K<\033[31m%s\033[0m> %s\n", me, msg)
+		// fmt.Printf(svc.prompt)
+	})
+	svc.Handle(OnSaltyReceived, func(ctx context.Context, sessionID []byte, them, msg string) {
+		fmt.Printf("\n\033[1A\r\033[2K<\033[34m%s\033[0m> %s\n", them, msg)
+		fmt.Printf(svc.prompt)
+	})
+	svc.Handle(OnOtherReceived, func(ctx context.Context, sessionID []byte, them, msg string) {
+		fmt.Printf("\n\033[1A\r\033[2K\033[90m::: unknown message: %s\033[0m\n", msg)
+		fmt.Printf(svc.prompt)
+	})
+
 	err := syscall.SetNonblock(0, true)
 	if err != nil {
 		log(err)
@@ -203,13 +149,9 @@ func (svc *service) doChat(ctx context.Context, me string, them *string, input s
 	*them = sp[1]
 	svc.setPrompt(me, *them)
 
-	established, err := svc.Client.Chat(ctx, *them)
+	_, err := svc.Chat(ctx, *them)
 	if err == nil {
 		return err
-	}
-	if !established {
-		fmt.Printf("\033[1A\r\033[2K**%s** offer chat...\n", me)
-		return nil
 	}
 	return nil
 }
@@ -228,11 +170,11 @@ func (svc *service) doClose(ctx context.Context, me string, them *string, input 
 
 	svc.setPrompt(me, "")
 	fmt.Printf("\033[1A\r\033[2K<%s> %s\n", me, input)
-	return svc.Client.Close(ctx, target)
+	return svc.Close(ctx, target)
 }
 func (svc *service) doDefault(ctx context.Context, me string, them *string, input string) error {
-	fmt.Printf("\033[1A\r\033[2K<%s> %s\n", me, input)
-	return svc.Client.Send(ctx, *them, input)
+	fmt.Printf("\033[1A\r\033[2K<\033[31m%s\033[0m> %s\n", me, input)
+	return svc.Send(ctx, *them, input)
 }
 func (svc *service) setPrompt(me, them string) {
 	if them == "" {

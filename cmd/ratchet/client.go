@@ -12,6 +12,7 @@ import (
 	"git.mills.io/prologic/msgbus/client"
 	"github.com/keys-pub/keys"
 	"github.com/oklog/ulid/v2"
+	"github.com/sour-is/xochimilco"
 	"github.com/sour-is/xochimilco/cmd/ratchet/locker"
 	"go.mills.io/saltyim"
 	"golang.org/x/sync/errgroup"
@@ -28,6 +29,8 @@ type SessionManager interface {
 }
 
 type Client struct {
+	BaseCTX func() context.Context
+
 	sm   *locker.Locked[SessionManager]
 	addr saltyim.Addr
 	bus  *client.Client
@@ -35,7 +38,7 @@ type Client struct {
 	hdlr map[command][]HandlerFn
 }
 
-func NewClient(sm SessionManager, me string, handleFn func(in *msgbus.Message) error) (*Client, error) {
+func NewClient(sm SessionManager, me string) (*Client, error) {
 	addr, err := saltyim.LookupAddr(me)
 	if err != nil {
 		return nil, fmt.Errorf("lookup addr: %w", err)
@@ -47,18 +50,23 @@ func NewClient(sm SessionManager, me string, handleFn func(in *msgbus.Message) e
 	}
 
 	uri, inbox := saltyim.SplitInbox(addr.Endpoint().String())
-	bus := client.NewClient(uri, nil)
-	sub := bus.Subscribe(inbox, pos, handleFn)
-	hdlr := make(map[command][]HandlerFn)
 
-	return &Client{locker.New(sm), addr, bus, sub, hdlr}, nil
+	cl := &Client{
+		sm:   locker.New(sm),
+		addr: addr,
+		bus:  client.NewClient(uri, nil),
+		hdlr: make(map[command][]HandlerFn),
+	}
+	cl.sub = cl.bus.Subscribe(inbox, pos, cl.msgbusHandler)
+
+	return cl, nil
 }
 
 func (c *Client) Run(ctx context.Context) error {
 	return c.sub.Run(ctx)
 }
 
-type HandlerFn func(ctx context.Context, sessID ulid.ULID, them string, msg string)
+type HandlerFn func(ctx context.Context, sessionID []byte, them string, msg string)
 type command uint8
 
 const (
@@ -71,6 +79,7 @@ const (
 	OnSessionClosed
 	OnSaltyReceived
 	OnSaltySent
+	OnOtherReceived
 )
 
 func (c *Client) Chat(ctx context.Context, them string) (bool, error) {
@@ -98,11 +107,7 @@ func (c *Client) Chat(ctx context.Context, them string) (bool, error) {
 				return err
 			}
 
-			defer func() {
-				err = c.dispatch(ctx, OnOfferSent, sm.ByName(them), them, "")
-			}()
-
-			return err
+			return c.dispatch(ctx, OnOfferSent, session.LocalUUID, them, "")
 		}
 		if err != nil {
 			return err
@@ -115,27 +120,28 @@ func (c *Client) Chat(ctx context.Context, them string) (bool, error) {
 				return err
 			}
 
-			defer func() {
-				err = c.dispatch(ctx, OnSessionStarted, sm.ByName(them), them, "")
-			}()
-
+			err = sm.Put(session)
+			if err != nil {
+				return err
+			}
 			established = true
 			session.PendingAck = ""
-			return sm.Put(session)
+
+			return c.dispatch(ctx, OnSessionStarted, session.LocalUUID, them, "")
 		}
 
 		return err
 	})
 }
 
-func (c *Client) Send(ctx context.Context, them, msg string) error {
+func (c *Client) Send(ctx context.Context, them, input string) error {
 	return c.sm.Use(ctx, func(ctx context.Context, sm SessionManager) error {
 		session, err := sm.Get(sm.ByName(them))
 		if err != nil {
 			return err
 		}
 
-		msg, err := session.Send([]byte(msg))
+		msg, err := session.Send([]byte(input))
 		if err != nil {
 			return err
 		}
@@ -145,14 +151,14 @@ func (c *Client) Send(ctx context.Context, them, msg string) error {
 			return err
 		}
 
-		defer func() {
-			err = c.dispatch(ctx, OnMessageSent, sm.ByName(them), them, msg)
-		}()
+		err = sm.Put(session)
+		if err != nil {
+			return err
+		}
 
-		return sm.Put(session)
+		return c.dispatch(ctx, OnMessageSent, session.LocalUUID, them, input)
 	})
 }
-
 func (c *Client) Close(ctx context.Context, them string) error {
 	return c.sm.Use(ctx, func(ctx context.Context, sm SessionManager) error {
 		session, err := sm.Get(sm.ByName(them))
@@ -170,7 +176,7 @@ func (c *Client) Close(ctx context.Context, them string) error {
 			return err
 		}
 
-		err = c.dispatch(ctx, OnSessionClosed, sm.ByName(them), them, "")
+		err = c.dispatch(ctx, OnSessionClosed, session.LocalUUID, them, "")
 		if err != nil {
 			return err
 		}
@@ -183,14 +189,111 @@ func (c *Client) Close(ctx context.Context, them string) error {
 		return err
 	})
 }
-
 func (c *Client) SendSalty(ctx context.Context, them, msg string) error { return nil }
 
 func (c *Client) Handle(cmd command, fn HandlerFn) {
 	c.hdlr[cmd] = append(c.hdlr[cmd], fn)
 }
 
-func (c *Client) dispatch(ctx context.Context, cmd command, sessID ulid.ULID, them string, msg string) error {
+func (c *Client) Context() (context.Context, context.CancelFunc) {
+	ctx := context.Background()
+	if c.BaseCTX != nil {
+		ctx = c.BaseCTX()
+	}
+	return context.WithCancel(ctx)
+}
+
+func (c *Client) msgbusHandler(in *msgbus.Message) error {
+	ctx, cancel := c.Context()
+	defer cancel()
+
+	input := string(in.Payload)
+	if !(strings.HasPrefix(input, "!RAT!") && strings.HasSuffix(input, "!CHT!")) {
+		return c.dispatch(ctx, OnOtherReceived, nil, "", input)
+	}
+
+	id, msg, err := readMsg(input)
+	if err != nil {
+		return fmt.Errorf("reading msg: %w", err)
+	}
+
+	return c.sm.Use(ctx, func(ctx context.Context, sm SessionManager) error {
+		// Update session manager position in stream if supported.
+		if pos, ok := sm.(interface{ SetPosition(int64) }); ok {
+			pos.SetPosition(in.ID + 1)
+		}
+
+		// unseal message if required.
+		if sealed, ok := msg.(interface {
+			Unseal(priv, pub *[32]byte) (m xochimilco.Msg, err error)
+		}); ok {
+			msg, err = sealed.Unseal(
+				sm.Identity().X25519Key().Bytes32(),
+				sm.Identity().X25519Key().PublicKey().Bytes32(),
+			)
+			if err != nil {
+				return err
+			}
+		}
+
+		var sess *Session
+
+		// offer messages have a nick embeded in the payload.
+		if offer, ok := msg.(interface {
+			Nick() string
+		}); ok {
+			sess, err = sm.New(offer.Nick())
+			if err != nil {
+				return fmt.Errorf("get session: %w", err)
+			}
+			err = c.dispatch(ctx, OnOfferReceived, msg.ID(), offer.Nick(), "")
+			if err != nil {
+				return err
+			}
+		} else {
+			sess, err = sm.Get(id)
+			if errors.Is(err, os.ErrNotExist) {
+				log("no sesson", id)
+				return nil
+			}
+			if err != nil {
+				return fmt.Errorf("get session: %w", err)
+			}
+		}
+
+		if sess == nil {
+			return nil
+		}
+
+		isEstablished, isClosed, plaintext, err := sess.ReceiveMsg(msg)
+		if err != nil {
+			return fmt.Errorf("session receive: %w", err)
+		}
+
+		err = sm.Put(sess)
+		if err != nil {
+			return err
+		}
+
+		switch {
+		case isClosed:
+			log("GOT: closing session...")
+			err = sm.Delete(sess)
+			if err != nil {
+				return err
+			}
+
+			return c.dispatch(ctx, OnSessionClosed, sess.LocalUUID, sess.Name, "")
+		case isEstablished:
+			log("GOT: session established with ", sess.Name, "...", sess.Endpoint)
+			return c.dispatch(ctx, OnSessionStarted, sess.LocalUUID, sess.Name, "")
+		}
+
+		return c.dispatch(ctx, OnMessageReceived, sess.LocalUUID, sess.Name, string(plaintext))
+	})
+}
+
+func (c *Client) dispatch(ctx context.Context, cmd command, sessionID []byte, them string, msg string) error {
 	hdlrs := c.hdlr[cmd]
 
 	wg, ctx := errgroup.WithContext(ctx)
@@ -198,7 +301,7 @@ func (c *Client) dispatch(ctx context.Context, cmd command, sessID ulid.ULID, th
 	for i := range hdlrs {
 		hdlr := hdlrs[i]
 		wg.Go(func() error {
-			hdlr(ctx, sessID, them, msg)
+			hdlr(ctx, sessionID, them, msg)
 			return nil
 		})
 	}
