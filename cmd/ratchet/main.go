@@ -96,8 +96,6 @@ func run(ctx context.Context, opts opts) error {
 		if err != nil {
 			return fmt.Errorf("read session: %w", err)
 		}
-		// log("local session", toULID(sess.LocalUUID).String())
-		// log("remote session", toULID(sess.RemoteUUID).String())
 		msg, err := sess.OfferSealed(sess.PeerKey.X25519PublicKey().Bytes())
 		if err != nil {
 			return err
@@ -143,10 +141,7 @@ func run(ctx context.Context, opts opts) error {
 		if err != nil {
 			return fmt.Errorf("read session: %w", err)
 		}
-		// log("me:", me, "send:", opts.Them)
-		// log("local session", toULID(sess.LocalUUID).String())
-		// log("remote session", toULID(sess.RemoteUUID).String())
-
+		
 		msg, err := sess.Send([]byte(input))
 		if err != nil {
 			return fmt.Errorf("send: %w", err)
@@ -194,12 +189,15 @@ func run(ctx context.Context, opts opts) error {
 		log("msg session", id.String())
 
 		if sealed, ok := msg.(interface {
-			Unseal([]byte) (xochimilco.Msg, error)
+			Unseal(priv, pub *[32]byte)  (xochimilco.Msg, error)
 		}); ok {
 			joined := make([]byte, 64)
 			copy(joined, key.X25519Key().Private())
 			copy(joined[32:], key.X25519Key().Public())
-			msg, err = sealed.Unseal(joined)
+			msg, err = sealed.Unseal(
+				key.X25519Key().Bytes32(),
+				key.PublicKey().X25519PublicKey().Bytes32(),
+			)
 			if err != nil {
 				return err
 			}

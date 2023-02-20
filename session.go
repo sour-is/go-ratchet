@@ -223,6 +223,7 @@ func (sess *Session) receiveOffer(offer *offerMessage) (isEstablished bool, ackM
 		cipher: initialCiphertext,
 		uuid:   sess.RemoteUUID,
 	}
+	sess.IdentityKey = nil
 	ackMsg, err = marshalMessage(sessAck, ack)
 
 	return
@@ -254,16 +255,14 @@ func (sess *Session) receiveAck(ack *ackMessage) (isEstablished bool, err error)
 	if err != nil {
 		return
 	}
-	// sess.LocalUUID = ack.uuid
 	sess.spkPub, sess.spkPriv = nil, nil
-
 	plaintext, err := sess.doubleRatchet.Decrypt(ack.cipher)
 	if err != nil {
 		return
 	}
 
 	sess.RemoteUUID = plaintext[:16]
-
+	sess.IdentityKey = nil
 	isEstablished = true
 	return
 }

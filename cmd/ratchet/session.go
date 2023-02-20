@@ -293,3 +293,8 @@ func sessionhash(self string, id ulid.ULID) string {
 	h.Write(id.Entropy())
 	return enc(h.Sum(nil))
 }
+
+var (
+	ErrNotExist = errors.New("does not exist")
+	ErrInternal = errors.New("internal error")
+)

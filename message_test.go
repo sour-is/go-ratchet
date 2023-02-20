@@ -105,11 +105,7 @@ func TestSeal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	joined := make([]byte, 64)
-	copy(joined[:32], bobPriv[:])
-	copy(joined[32:], bobPub[:])
-
-	tm, err := s.Unseal(joined)
+	tm, err := s.Unseal(bobPub, bobPriv)
 
 	if err != nil {
 		t.Fatal(err)

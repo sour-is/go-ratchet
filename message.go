@@ -336,14 +336,10 @@ func Seal(m encoding.BinaryMarshaler, k []byte) (out sealedMessage, err error) {
 	return box.SealAnonymous(nil, data, &key, nil)
 }
 
-func (s sealedMessage) Unseal(k []byte) (m Msg, err error) {
+func (s sealedMessage) Unseal(priv, pub *[32]byte) (m Msg, err error) {
 	var ok bool
 	var data []byte
-	var pub [32]byte
-	var priv [32]byte
-	copy(priv[:], k[:32])
-	copy(pub[:], k[32:])
-	data, ok = box.OpenAnonymous(nil, s, &pub, &priv)
+	data, ok = box.OpenAnonymous(nil, s, pub, priv)
 	if !ok {
 		err = fmt.Errorf("unseal invalid")
 		return

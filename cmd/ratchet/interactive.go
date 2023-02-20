@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"strings"
 	"syscall"
@@ -57,12 +56,12 @@ func (svc *service) Handle(in *msgbus.Message) error {
 		}
 
 		if sealed, ok := msg.(interface {
-			Unseal([]byte) (xochimilco.Msg, error)
+			Unseal(priv, pub *[32]byte) (m xochimilco.Msg, err error)
 		}); ok {
-			joined := make([]byte, 64)
-			copy(joined, sm.Identity().X25519Key().Private())
-			copy(joined[32:], sm.Identity().X25519Key().Public())
-			msg, err = sealed.Unseal(joined)
+			msg, err = sealed.Unseal(
+				sm.Identity().X25519Key().Bytes32(),
+				sm.Identity().X25519Key().PublicKey().Bytes32(),
+			)
 			if err != nil {
 				return err
 			}
@@ -86,14 +85,11 @@ func (svc *service) Handle(in *msgbus.Message) error {
 				return fmt.Errorf("get session: %w", err)
 			}
 		}
-		// log("local session", toULID(sess.LocalUUID).String())
-		// log("remote session", toULID(sess.RemoteUUID).String())
 
 		isEstablished, isClosed, plaintext, err := sess.ReceiveMsg(msg)
 		if err != nil {
 			return fmt.Errorf("session receive: %w", err)
 		}
-		// log("(updated) remote session", toULID(sess.RemoteUUID).String())
 
 		err = sm.Put(sess)
 		if err != nil {
@@ -188,148 +184,55 @@ func (svc *service) Interactive(ctx context.Context, me, them string) {
 }
 
 func (svc *service) doChat(ctx context.Context, me string, them *string, input string) error {
-	return svc.sm.Use(ctx, func(ctx context.Context, sm SessionManager) error {
-		sp := strings.Fields(input)
-
-		// handle show list of open sessions
-		if len(sp) <= 1 {
+	sp := strings.Fields(input)
+	// handle show list of open sessions
+	if len(sp) <= 1 {
+		return svc.sm.Use(ctx, func(ctx context.Context, sm SessionManager) error {
 			log("usage: /chat|close username")
 			for _, p := range sm.Sessions() {
 				log("sess: ", p.Name)
 			}
 			return nil
-		}
+		})
+	}
 
-		if me == sp[1] {
-			return fmt.Errorf("cant racthet with self")
-		}
+	if me == sp[1] {
+		return fmt.Errorf("cant racthet with self")
+	}
 
-		*them = sp[1]
-		svc.setPrompt(me, *them)
+	*them = sp[1]
+	svc.setPrompt(me, *them)
 
-		session, err := sm.Get(sm.ByName(sp[1]))
-
-		// handle initiating a new chat
-		if err != nil && errors.Is(err, os.ErrNotExist) {
-			session, err = sm.New(sp[1])
-			if err != nil {
-				return err
-			}
-			msg, err := session.Offer()
-			if err != nil {
-				return err
-			}
-
-			fmt.Printf("\033[1A\r\033[2K**%s** offer chat...\n", me)
-			err = svc.sendMsg(session, msg)
-			if err != nil {
-				return err
-			}
-			err = sm.Put(session)
-			if err != nil {
-				return err
-			}
-
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-
-		// handle a pending ack from offer.
-		if len(session.PendingAck) > 0 {
-			err = svc.sendMsg(session, session.PendingAck)
-			if err != nil {
-				return err
-			}
-			session.PendingAck = ""
-			return sm.Put(session)
-		}
-
-		return nil
-	})
-}
-func (svc *service) doClose(ctx context.Context, me string, them *string, input string) error {
-	return svc.sm.Use(ctx, func(ctx context.Context, sm SessionManager) error {
-		var err error
-		var session *Session
-
-		sp := strings.Fields(input)
-
-		if len(sp) > 1 {
-			session, err = sm.Get(sm.ByName(sp[1]))
-			if err != nil {
-				return err
-			}
-		} else if *them != "" {
-			session, err = sm.Get(sm.ByName(*them))
-			if err != nil {
-				return err
-			}
-		}
-
-		if session == nil {
-			return nil
-		}
-
-		msg, err := session.Close()
-		if err != nil {
-			return err
-		}
-
-		fmt.Printf("\033[1A\r\033[2K<%s> %s\n", me, input)
-		_, err = http.DefaultClient.Post(session.Endpoint, "text/plain", strings.NewReader(msg))
-		if err != nil {
-			return err
-		}
-
-		if session.Name == *them {
-			*them = ""
-			svc.setPrompt(me, *them)
-		}
-
-		err = sm.Delete(session)
-		if err != nil {
-			return err
-		}
-
-		return nil
-	})
-}
-func (svc *service) doDefault(ctx context.Context, me string, them *string, input string) error {
-	return svc.sm.Use(ctx, func(ctx context.Context, sm SessionManager) error {
-		var err error
-		var session *Session
-		session, err = sm.Get(sm.ByName(*them))
-		if err != nil {
-			if session == nil {
-				*them = ""
-
-				return nil
-			}
-			return err
-		}
-
-		fmt.Printf("\033[1A\r\033[2K<%s> %s\n", me, input)
-		msg, err := session.Send([]byte(input))
-		if err != nil {
-			return err
-		}
-
-		err = svc.sendMsg(session, msg)
-		if err != nil {
-			return err
-		}
-
-		return sm.Put(session)
-	})
-}
-func (svc *service) sendMsg(session *Session, msg string) error {
-	_, err := http.DefaultClient.Post(session.Endpoint, "text/plain", strings.NewReader(msg))
-	if err != nil {
+	established, err := svc.Client.Chat(ctx, *them)
+	if err == nil {
 		return err
 	}
+	if !established {
+		fmt.Printf("\033[1A\r\033[2K**%s** offer chat...\n", me)
+		return nil
+	}
 	return nil
+}
+func (svc *service) doClose(ctx context.Context, me string, them *string, input string) error {
+	sp := strings.Fields(input)
+
+	target := *them
+
+	if len(sp) > 1 {
+		target = sp[1]
+	}
+
+	if target == "" {
+		return nil
+	}
+
+	svc.setPrompt(me, "")
+	fmt.Printf("\033[1A\r\033[2K<%s> %s\n", me, input)
+	return svc.Client.Close(ctx, target)
+}
+func (svc *service) doDefault(ctx context.Context, me string, them *string, input string) error {
+	fmt.Printf("\033[1A\r\033[2K<%s> %s\n", me, input)
+	return svc.Client.Send(ctx, *them, input)
 }
 func (svc *service) setPrompt(me, them string) {
 	if them == "" {
