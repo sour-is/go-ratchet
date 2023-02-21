@@ -1,4 +1,4 @@
-package main
+package client
 
 import (
 	"context"
@@ -14,19 +14,21 @@ import (
 	"github.com/oklog/ulid/v2"
 	"github.com/sour-is/xochimilco"
 	"github.com/sour-is/xochimilco/cmd/ratchet/locker"
+	"github.com/sour-is/xochimilco/cmd/ratchet/session"
 	"go.mills.io/salty"
 	"go.mills.io/saltyim"
+	"go.yarn.social/lextwt"
 	"golang.org/x/sync/errgroup"
 )
 
 type SessionManager interface {
 	Identity() *keys.EdX25519Key
 	ByName(name string) ulid.ULID
-	New(them string) (*Session, error)
-	Get(id ulid.ULID) (*Session, error)
-	Put(sess *Session) error
-	Delete(sess *Session) error
-	Sessions() []pair[string, ulid.ULID]
+	New(them string) (*session.Session, error)
+	Get(id ulid.ULID) (*session.Session, error)
+	Put(sess *session.Session) error
+	Delete(sess *session.Session) error
+	Sessions() []session.Pair[string, ulid.ULID]
 }
 
 type Client struct {
@@ -36,7 +38,8 @@ type Client struct {
 	addr saltyim.Addr
 	bus  *client.Client
 	sub  *client.Subscriber
-	hdlr map[command][]HandlerFn
+
+	on map[any][]any
 }
 
 func NewClient(sm SessionManager, me string) (*Client, error) {
@@ -56,7 +59,7 @@ func NewClient(sm SessionManager, me string) (*Client, error) {
 		sm:   locker.New(sm),
 		addr: addr,
 		bus:  client.NewClient(uri, nil),
-		hdlr: make(map[command][]HandlerFn),
+		on:   make(map[any][]any),
 	}
 	cl.sub = cl.bus.Subscribe(inbox, pos, cl.msgbusHandler)
 
@@ -67,21 +70,75 @@ func (c *Client) Run(ctx context.Context) error {
 	return c.sub.Run(ctx)
 }
 
-type HandlerFn func(ctx context.Context, sessionID []byte, them string, msg string)
-type command uint8
+func On[T any](c *Client, fn func(context.Context, T)) {
+	var id T
+	c.on[id] = append(c.on[id], fn)
+}
 
-const (
-	_ command = iota
-	OnOfferSent
-	OnOfferReceived
-	OnSessionStarted
-	OnMessageReceived
-	OnMessageSent
-	OnSessionClosed
-	OnSaltyReceived
-	OnSaltySent
-	OnOtherReceived
-)
+func dispatch[T any](ctx context.Context, c *Client, args T) error {
+	var id T
+	hdlrs := c.on[id]
+
+	wg, ctx := errgroup.WithContext(ctx)
+
+	for i := range hdlrs {
+		hdlr := hdlrs[i].(func(context.Context, T))
+		wg.Go(func() error {
+			hdlr(ctx, args)
+			return nil
+		})
+	}
+	return wg.Wait()
+
+}
+
+type OnOfferSent struct {
+	ID   ulid.ULID
+	Them string
+}
+type OnOfferReceived struct {
+	ID   ulid.ULID
+	Them string
+}
+type OnSessionStarted struct {
+	ID   ulid.ULID
+	Them string
+}
+type OnMessageReceived struct {
+	ID   ulid.ULID
+	Them string
+	Msg  string
+}
+type OnMessageSent struct {
+	ID     ulid.ULID
+	Them   string
+	Msg    string
+	Sealed string
+}
+type OnSessionClosed struct {
+	ID   ulid.ULID
+	Them string
+}
+type OnSaltyTextReceived struct {
+	Pubkey *keys.EdX25519PublicKey
+	Msg    *lextwt.SaltyText
+}
+type OnSaltyEventReceived struct {
+	Pubkey *keys.EdX25519PublicKey
+	Event  *lextwt.SaltyEvent
+}
+type OnSaltySent struct {
+	Them string
+	Addr saltyim.Addr
+	Msg  string
+}
+type OnOtherReceived struct {
+	Raw string
+}
+
+func (c *Client) Use(ctx context.Context, fn func(context.Context, SessionManager) error) error {
+	return c.sm.Use(ctx, fn)
+}
 
 func (c *Client) Chat(ctx context.Context, them string) (bool, error) {
 	established := false
@@ -108,7 +165,7 @@ func (c *Client) Chat(ctx context.Context, them string) (bool, error) {
 				return err
 			}
 
-			return c.dispatch(ctx, OnOfferSent, session.LocalUUID, them, "")
+			return dispatch(ctx, c, OnOfferSent{toULID(session.LocalUUID), them})
 		}
 		if err != nil {
 			return err
@@ -128,13 +185,12 @@ func (c *Client) Chat(ctx context.Context, them string) (bool, error) {
 			established = true
 			session.PendingAck = ""
 
-			return c.dispatch(ctx, OnSessionStarted, session.LocalUUID, them, "")
+			return dispatch(ctx, c, OnSessionStarted{toULID(session.LocalUUID), them})
 		}
 
 		return err
 	})
 }
-
 func (c *Client) Send(ctx context.Context, them, input string) error {
 	return c.sm.Use(ctx, func(ctx context.Context, sm SessionManager) error {
 		session, err := sm.Get(sm.ByName(them))
@@ -157,7 +213,7 @@ func (c *Client) Send(ctx context.Context, them, input string) error {
 			return err
 		}
 
-		return c.dispatch(ctx, OnMessageSent, session.LocalUUID, them, input)
+		return dispatch(ctx, c, OnMessageSent{toULID(session.LocalUUID), them, input, msg})
 	})
 }
 func (c *Client) Close(ctx context.Context, them string) error {
@@ -177,7 +233,7 @@ func (c *Client) Close(ctx context.Context, them string) error {
 			return err
 		}
 
-		err = c.dispatch(ctx, OnSessionClosed, session.LocalUUID, them, "")
+		err = dispatch(ctx, c, OnSessionClosed{toULID(session.LocalUUID), them})
 		if err != nil {
 			return err
 		}
@@ -201,17 +257,14 @@ func (c *Client) SendSalty(ctx context.Context, them, msg string) error {
 		if err != nil {
 			return fmt.Errorf("error encrypting message to %s: %w", addr, err)
 		}
-	
+
 		err = saltyim.Send(addr.Endpoint().String(), string(b), addr.Cap())
 		if err != nil {
 			return err
 		}
-		return c.dispatch(ctx, OnSaltySent, nil, them, msg)	
-	})
-}
 
-func (c *Client) Handle(cmd command, fn HandlerFn) {
-	c.hdlr[cmd] = append(c.hdlr[cmd], fn)
+		return dispatch(ctx, c, OnSaltySent{them, addr, msg})
+	})
 }
 
 func (c *Client) Context() (context.Context, context.CancelFunc) {
@@ -235,17 +288,31 @@ func (c *Client) msgbusHandler(in *msgbus.Message) error {
 				pos.SetPosition(in.ID + 1)
 			}
 
-			msg, _, err := salty.Decrypt(sm.Identity(), []byte(input))
+			text, key, err := salty.Decrypt(sm.Identity(), []byte(input))
 			if err != nil {
 				return err
 			}
 
-			return c.dispatch(ctx, OnSaltyReceived, nil, "", string(msg))
+			msg, err := lextwt.ParseSalty(string(text))
+			if err != nil {
+				return err
+			}
+
+			switch msg := msg.(type) {
+			case *lextwt.SaltyEvent:
+				return dispatch(ctx, c, OnSaltyEventReceived{key, msg})
+
+			case *lextwt.SaltyText:
+				return dispatch(ctx, c, OnSaltyTextReceived{key, msg})
+
+			}
+
+			return nil
 		})
 	}
 
 	if !(strings.HasPrefix(input, "!RAT!") && strings.HasSuffix(input, "!CHT!")) {
-		return c.dispatch(ctx, OnOtherReceived, nil, "", input)
+		return dispatch(ctx, c, OnOtherReceived{input})
 	}
 
 	id, msg, err := readMsg(input)
@@ -272,7 +339,7 @@ func (c *Client) msgbusHandler(in *msgbus.Message) error {
 			}
 		}
 
-		var sess *Session
+		var sess *session.Session
 
 		// offer messages have a nick embeded in the payload.
 		if offer, ok := msg.(interface {
@@ -282,14 +349,13 @@ func (c *Client) msgbusHandler(in *msgbus.Message) error {
 			if err != nil {
 				return fmt.Errorf("get session: %w", err)
 			}
-			err = c.dispatch(ctx, OnOfferReceived, msg.ID(), offer.Nick(), "")
+			err = dispatch(ctx, c, OnOfferReceived{toULID(msg.ID()), offer.Nick()})
 			if err != nil {
 				return err
 			}
 		} else {
 			sess, err = sm.Get(id)
 			if errors.Is(err, os.ErrNotExist) {
-				log("no sesson", id)
 				return nil
 			}
 			if err != nil {
@@ -313,40 +379,41 @@ func (c *Client) msgbusHandler(in *msgbus.Message) error {
 
 		switch {
 		case isClosed:
-			log("GOT: closing session...")
 			err = sm.Delete(sess)
 			if err != nil {
 				return err
 			}
 
-			return c.dispatch(ctx, OnSessionClosed, msg.ID(), sess.Name, "")
+			return dispatch(ctx, c, OnSessionClosed{toULID(msg.ID()), sess.Name})
 		case isEstablished:
-			log("GOT: session established with ", sess.Name, "...", sess.Endpoint)
-			return c.dispatch(ctx, OnSessionStarted, msg.ID(), sess.Name, "")
+			return dispatch(ctx, c, OnSessionStarted{toULID(msg.ID()), sess.Name})
 		}
 
-		return c.dispatch(ctx, OnMessageReceived, msg.ID(), sess.Name, string(plaintext))
+		return dispatch(ctx, c, OnMessageReceived{toULID(msg.ID()), sess.Name, string(plaintext)})
 	})
 }
 
-func (c *Client) dispatch(ctx context.Context, cmd command, sessionID []byte, them string, msg string) error {
-	hdlrs := c.hdlr[cmd]
-
-	wg, ctx := errgroup.WithContext(ctx)
-
-	for i := range hdlrs {
-		hdlr := hdlrs[i]
-		wg.Go(func() error {
-			hdlr(ctx, sessionID, them, msg)
-			return nil
-		})
-	}
-	return wg.Wait()
-}
-func (c *Client) sendMsg(session *Session, msg string) error {
+func (c *Client) sendMsg(session *session.Session, msg string) error {
 	_, err := http.DefaultClient.Post(session.Endpoint, "text/plain", strings.NewReader(msg))
 	if err != nil {
 		return err
 	}
 	return nil
+}
+func readMsg(input string) (id ulid.ULID, msg xochimilco.Msg, err error) {
+	// log(input)
+
+	msg, err = xochimilco.Parse(input)
+	if err != nil {
+		return
+	}
+
+	copy(id[:], msg.ID())
+
+	return
+}
+func toULID(b []byte) ulid.ULID {
+	var id ulid.ULID
+	copy(id[:], b)
+	return id
 }

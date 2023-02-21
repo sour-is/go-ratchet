@@ -1,18 +1,17 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 
 	"github.com/docopt/docopt-go"
-	"go.mills.io/saltyim"
+	"github.com/oklog/ulid/v2"
 
-	"github.com/sour-is/xochimilco"
+	"github.com/sour-is/xochimilco/cmd/ratchet/client"
+	"github.com/sour-is/xochimilco/cmd/ratchet/interactive"
+	"github.com/sour-is/xochimilco/cmd/ratchet/session"
 	"github.com/sour-is/xochimilco/cmd/ratchet/xdg"
 )
 
@@ -81,223 +80,16 @@ func run(ctx context.Context, opts opts) error {
 
 	switch {
 	case opts.Offer:
-		me, key, err := readSaltyIdentity(opts.Key)
-		if err != nil {
-			return fmt.Errorf("reading keyfile: %w", err)
-		}
-
-		sm, close, err := NewSessionManager(opts.State, me, key)
-		if err != nil {
-			return err
-		}
-		defer close()
-
-		sess, err := sm.New(opts.Them)
-		if err != nil {
-			return fmt.Errorf("read session: %w", err)
-		}
-		msg, err := sess.OfferSealed(sess.PeerKey.X25519PublicKey().Bytes())
-		if err != nil {
-			return err
-		}
-
-		err = sm.Put(sess)
-		if err != nil {
-			return err
-		}
-
-		fmt.Println(msg)
-		if opts.Post {
-			addr, err := saltyim.LookupAddr(opts.Them)
-			if err != nil {
-				return err
-			}
-			_, err = http.DefaultClient.Post(addr.Endpoint().String(), "text/plain", strings.NewReader(msg))
-			if err != nil {
-				return err
-			}
-		}
-
-		return nil
+		return doOffer(ctx, opts)
 
 	case opts.Send:
-		me, key, err := readSaltyIdentity(opts.Key)
-		if err != nil {
-			return fmt.Errorf("reading keyfile: %w", err)
-		}
-
-		sm, close, err := NewSessionManager(opts.State, me, key)
-		if err != nil {
-			return err
-		}
-		defer close()
-
-		input, err := readInput(opts)
-		if err != nil {
-			return fmt.Errorf("reading input: %w", err)
-		}
-
-		sess, err := sm.Get(sm.ByName(opts.Them))
-		if err != nil {
-			return fmt.Errorf("read session: %w", err)
-		}
-		
-		msg, err := sess.Send([]byte(input))
-		if err != nil {
-			return fmt.Errorf("send: %w", err)
-		}
-		err = sm.Put(sess)
-		if err != nil {
-			return err
-		}
-
-		fmt.Println(msg)
-		if opts.Post {
-			addr, err := saltyim.LookupAddr(opts.Them)
-			if err != nil {
-				return err
-			}
-
-			_, err = http.DefaultClient.Post(addr.Endpoint().String(), "text/plain", strings.NewReader(msg))
-			if err != nil {
-				return err
-			}
-		}
-
-		return nil
+		return doSend(ctx, opts)
 
 	case opts.Recv:
-		me, key, err := readSaltyIdentity(opts.Key)
-		if err != nil {
-			return fmt.Errorf("reading keyfile: %w", err)
-		}
-
-		sm, close, err := NewSessionManager(opts.State, me, key)
-		if err != nil {
-			return err
-		}
-		defer close()
-
-		input, err := readInput(opts)
-		if err != nil {
-			return fmt.Errorf("reading input: %w", err)
-		}
-		id, msg, err := readMsg(input)
-		if err != nil {
-			return fmt.Errorf("reading msg: %w", err)
-		}
-		log("msg session", id.String())
-
-		if sealed, ok := msg.(interface {
-			Unseal(priv, pub *[32]byte)  (xochimilco.Msg, error)
-		}); ok {
-			joined := make([]byte, 64)
-			copy(joined, key.X25519Key().Private())
-			copy(joined[32:], key.X25519Key().Public())
-			msg, err = sealed.Unseal(
-				key.X25519Key().Bytes32(),
-				key.PublicKey().X25519PublicKey().Bytes32(),
-			)
-			if err != nil {
-				return err
-			}
-		}
-
-		var sess *Session
-		if offer, ok := msg.(interface {
-			Nick() string
-		}); ok {
-			sess, err = sm.New(offer.Nick())
-			if err != nil {
-				return fmt.Errorf("get session: %w", err)
-			}
-		} else {
-			sess, err = sm.Get(id)
-			if err != nil {
-				return fmt.Errorf("get session: %w", err)
-			}
-		}
-		// log("local session", toULID(sess.LocalUUID).String())
-		// log("remote session", toULID(sess.RemoteUUID).String())
-
-		isEstablished, isClosed, plaintext, err := sess.ReceiveMsg(msg)
-		if err != nil {
-			return fmt.Errorf("session receive: %w", err)
-		}
-		log("(updated) remote session", toULID(sess.RemoteUUID).String())
-
-		err = sm.Put(sess)
-		if err != nil {
-			return err
-		}
-
-		switch {
-		case isClosed:
-			log("GOT: closing session...")
-			return sm.Delete(sess)
-		case isEstablished:
-			log("GOT: session established with ", sess.Name, "...")
-			if len(plaintext) > 0 {
-				fmt.Println(string(plaintext))
-				if opts.Post {
-					addr, err := saltyim.LookupAddr(opts.Them)
-					if err != nil {
-						return err
-					}
-
-					_, err = http.DefaultClient.Post(addr.Endpoint().String(), "text/plain", bytes.NewReader(plaintext))
-					if err != nil {
-						return err
-					}
-				}
-			}
-
-		default:
-			log("GOT: ", sess.Name, ">", string(plaintext))
-		}
-
-		return nil
+		return doRecv(ctx, opts)
 
 	case opts.Close:
-		me, key, err := readSaltyIdentity(opts.Key)
-		if err != nil {
-			return fmt.Errorf("reading keyfile: %w", err)
-		}
-
-		sm, close, err := NewSessionManager(opts.State, me, key)
-		if err != nil {
-			return err
-		}
-		defer close()
-
-		sess, err := sm.Get(sm.ByName(opts.Them))
-		if err != nil {
-			return fmt.Errorf("read session: %w", err)
-		}
-
-		msg, err := sess.Close()
-		if err != nil {
-			return fmt.Errorf("session close: %w", err)
-		}
-
-		err = sm.Delete(sess)
-		if err != nil {
-			return err
-		}
-
-		fmt.Println(msg)
-		if opts.Post {
-			addr, err := saltyim.LookupAddr(opts.Them)
-			if err != nil {
-				return err
-			}
-
-			_, err = http.DefaultClient.Post(addr.Endpoint().String(), "text/plain", strings.NewReader(msg))
-			if err != nil {
-				return err
-			}
-		}
-		return nil
+		return doClose(ctx, opts)
 
 	case opts.Chat:
 		me, key, err := readSaltyIdentity(opts.Key)
@@ -305,23 +97,21 @@ func run(ctx context.Context, opts opts) error {
 			return fmt.Errorf("reading keyfile: %w", err)
 		}
 
-		sm, close, err := NewSessionManager(opts.State, me, key)
+		sm, close, err := session.NewSessionManager(opts.State, me, key)
 		if err != nil {
 			return err
 		}
 		defer close()
 
-		svc := &service{}
-		svc.Client, err = NewClient(sm, me)
+		c, err := client.NewClient(sm, me)
 		if err != nil {
 			return err
 		}
-		svc.Client.BaseCTX = func() context.Context { return ctx }
+		c.BaseCTX = func() context.Context { return ctx }
 
-		return svc.Run(ctx, me, opts.Them)
+		return interactive.New(c).Run(ctx, me, opts.Them)
 
 	case opts.UI:
-
 		return nil
 
 	default:
@@ -333,4 +123,10 @@ func run(ctx context.Context, opts opts) error {
 
 func log(a ...any) {
 	fmt.Fprintf(os.Stderr, "\033[90m%s\033[0m\n", fmt.Sprint(a...))
+}
+
+func toULID(b []byte) ulid.ULID {
+	var id ulid.ULID
+	copy(id[:], b)
+	return id
 }

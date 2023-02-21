@@ -1,4 +1,4 @@
-package main
+package interactive
 
 import (
 	"bufio"
@@ -10,12 +10,17 @@ import (
 	"syscall"
 	"time"
 
-	"go.yarn.social/lextwt"
+	"github.com/oklog/ulid/v2"
+	"github.com/sour-is/xochimilco/cmd/ratchet/client"
 )
 
 type service struct {
 	prompt string
-	*Client
+	*client.Client
+}
+
+func New(c *client.Client) *service {
+	return &service{Client: c}
 }
 
 func (svc *service) Run(ctx context.Context, me, them string) error {
@@ -24,52 +29,45 @@ func (svc *service) Run(ctx context.Context, me, them string) error {
 }
 
 func (svc *service) Interactive(ctx context.Context, me, them string) {
-	svc.Handle(OnOfferSent, func(ctx context.Context, sessionID []byte, them, msg string) {
-		fmt.Printf("\n\033[1A\r\033[2K\033[90m::: offer sent %s :::\033[0m\n", them)
+	client.On(svc.Client, func(ctx context.Context, args client.OnOfferSent) {
+		fmt.Printf("\n\033[1A\r\033[2K\033[90m::: offer sent %s :::\033[0m\n", args.Them)
 		fmt.Printf(svc.prompt)
 	})
-	svc.Handle(OnOfferReceived, func(ctx context.Context, sessionID []byte, them, msg string) {
-		fmt.Printf("\n\033[1A\r\033[2K\033[90m::: offer from %s :::\033[0m\n", them)
+	client.On(svc.Client, func(ctx context.Context, args client.OnOfferReceived) {
+		fmt.Printf("\n\033[1A\r\033[2K\033[90m::: offer from %s :::\033[0m\n", args.Them)
 		fmt.Printf(svc.prompt)
 	})
-	svc.Handle(OnSessionStarted, func(ctx context.Context, sessionID []byte, them, msg string) {
-		fmt.Printf("\n\033[1A\r\033[2K\033[90m::: session started with %s :::\033[0m\n", them)
+	client.On(svc.Client, func(ctx context.Context, args client.OnSessionStarted) {
+		fmt.Printf("\n\033[1A\r\033[2K\033[90m::: session started with %s :::\033[0m\n", args.Them)
 		fmt.Printf(svc.prompt)
 	})
-	svc.Handle(OnSessionClosed, func(ctx context.Context, sessionID []byte, target, msg string) {
-		fmt.Printf("\n\033[1A\r\033[2K\033[90m::: session closed with %s :::\033[0m\n", target)
-		if them == target {
+	client.On(svc.Client, func(ctx context.Context, args client.OnSessionClosed) {
+		fmt.Printf("\n\033[1A\r\033[2K\033[90m::: session closed with %s :::\033[0m\n", args.Them)
+		if them == args.Them {
 			svc.setPrompt(me, "")
 		}
 		fmt.Printf(svc.prompt)
 	})
-	svc.Handle(OnMessageReceived, func(ctx context.Context, sessionID []byte, them, msg string) {
-		fmt.Printf("\n\033[1A\r\033[2K%s <\033[31m%s\033[0m> %s\n", getTime(sessionID).Format("15:04:05"), them, msg)
+	client.On(svc.Client, func(ctx context.Context, args client.OnMessageReceived) {
+		fmt.Printf("\n\033[1A\r\033[2K%s <\033[31m%s\033[0m> %s\n", getTime(args.ID).Format("15:04:05"), args.Them, args.Msg)
 		fmt.Printf(svc.prompt)
 	})
-	svc.Handle(OnMessageSent, func(ctx context.Context, sessionID []byte, them, msg string) {
-		// fmt.Printf("\n\033[1A\r\033[2K<\033[31m%s\033[0m> %s\n", me, msg)
-		// fmt.Printf(svc.prompt)
+	client.On(svc.Client, func(ctx context.Context, args client.OnMessageSent) {
+		fmt.Printf("\033[1A\r\033[2K%s <\033[31m%s\033[0m> %s\n", time.Now().Format("15:04:05"), me, args.Msg)
 	})
-	svc.Handle(OnSaltySent, func(ctx context.Context, sessionID []byte, them, msg string) {
-		fmt.Printf("\n\033[1A\r\033[2K%s <\033[34m%s\033[0m> %s\n", time.Now().Format("15:04:05"), them, msg)
+	client.On(svc.Client, func(ctx context.Context, args client.OnSaltySent) {
+		fmt.Printf("\033[1A\r\033[2K%s <\033[34m%s\033[0m> %s\n", time.Now().Format("15:04:05"), me, args.Msg)
 	})
-	svc.Handle(OnSaltyReceived, func(ctx context.Context, _ []byte, _, msg string) {
-		s, err := lextwt.ParseSalty(msg)
-		if err != nil {
-			return
-		}
-		switch s := s.(type) {
-		case *lextwt.SaltyEvent:
-			fmt.Printf("\n\033[1A\r\033[2K\033[90m::: salty: %s(%s)\033[0m\n", s.Command, strings.Join(s.Args, ", "))
-		case *lextwt.SaltyText:
-			fmt.Printf("\n\033[1A\r\033[2K%s <\033[34m%s\033[0m> %s\n", s.Timestamp.DateTime().Format("15:04:05"), s.User, s.LiteralText())
-		}
-
+	client.On(svc.Client, func(ctx context.Context, args client.OnSaltyTextReceived) {
+		fmt.Printf("\n\033[1A\r\033[2K%s <\033[34m%s\033[0m> %s\n", args.Msg.Timestamp.DateTime().Format("15:04:05"), args.Msg.User, args.Msg.LiteralText())
 		fmt.Printf(svc.prompt)
 	})
-	svc.Handle(OnOtherReceived, func(ctx context.Context, sessionID []byte, them, msg string) {
-		fmt.Printf("\n\033[1A\r\033[2K\033[90m::: unknown message: %s\033[0m\n", msg)
+	client.On(svc.Client, func(ctx context.Context, args client.OnSaltyEventReceived) {
+		fmt.Printf("\n\033[1A\r\033[2K\033[90m::: salty: %s(%s)\033[0m\n", args.Event.Command, strings.Join(args.Event.Args, ", "))
+		fmt.Printf(svc.prompt)
+	})
+	client.On(svc.Client, func(ctx context.Context, args client.OnOtherReceived) {
+		fmt.Printf("\n\033[1A\r\033[2K\033[90m::: unknown message: %s\033[0m\n", args.Raw)
 		fmt.Printf(svc.prompt)
 	})
 
@@ -140,7 +138,6 @@ func (svc *service) Interactive(ctx context.Context, me, them string) {
 		}
 
 		if them == "" {
-			log("no session")
 			log("usage: /chat username")
 			continue
 		}
@@ -156,7 +153,7 @@ func (svc *service) doChat(ctx context.Context, me string, them *string, input s
 	sp := strings.Fields(input)
 	// handle show list of open sessions
 	if len(sp) <= 1 {
-		return svc.sm.Use(ctx, func(ctx context.Context, sm SessionManager) error {
+		return svc.Use(ctx, func(ctx context.Context, sm client.SessionManager) error {
 			log("usage: /chat|close username")
 			for _, p := range sm.Sessions() {
 				log("sess: ", p.Name)
@@ -196,7 +193,7 @@ func (svc *service) doClose(ctx context.Context, me string, them *string, input 
 	return svc.Close(ctx, target)
 }
 func (svc *service) doDefault(ctx context.Context, me string, them *string, input string) error {
-	fmt.Printf("\033[1A\r\033[2K<\033[31m%s\033[0m> %s\n", me, input)
+	// fmt.Printf("\033[1A\r\033[2K<\033[31m%s\033[0m> %s\n", me, input)
 	return svc.Send(ctx, *them, input)
 }
 func (svc *service) setPrompt(me, them string) {
@@ -230,7 +227,10 @@ func (r *ctxReader) Read(b []byte) (int, error) {
 	}
 }
 
-func getTime(b []byte) time.Time {
-	u := toULID(b)
+func getTime(u ulid.ULID) time.Time {
 	return time.UnixMilli(int64(u.Time()))
+}
+
+func log(a ...any) {
+	fmt.Fprintf(os.Stderr, "\033[90m%s\033[0m\n", fmt.Sprint(a...))
 }

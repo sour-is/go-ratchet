@@ -1,8 +1,9 @@
-package main
+package session
 
 import (
 	"bytes"
 	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/gob"
 	"encoding/json"
 	"errors"
@@ -275,15 +276,15 @@ func (sm *DiskSessionManager) SetPosition(pos int64) {
 	sm.pos = pos
 }
 
-type pair[K, V any] struct {
+type Pair[K, V any] struct {
 	Name K
 	ID   V
 }
 
-func (sm *DiskSessionManager) Sessions() []pair[string, ulid.ULID] {
-	lis := make([]pair[string, ulid.ULID], 0, len(sm.sessions))
+func (sm *DiskSessionManager) Sessions() []Pair[string, ulid.ULID] {
+	lis := make([]Pair[string, ulid.ULID], 0, len(sm.sessions))
 	for k, v := range sm.sessions {
-		lis = append(lis, pair[string, ulid.ULID]{k, v})
+		lis = append(lis, Pair[string, ulid.ULID]{k, v})
 	}
 	return lis
 }
@@ -293,6 +294,31 @@ func sessionhash(self string, id ulid.ULID) string {
 	fmt.Fprint(h, self)
 	h.Write(id.Entropy())
 	return enc(h.Sum(nil))
+}
+
+func log(a ...any) {
+	fmt.Fprintf(os.Stderr, "\033[90m%s\033[0m\n", fmt.Sprint(a...))
+}
+
+func enc(b []byte) string {
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+func toULID(b []byte) ulid.ULID {
+	var id ulid.ULID
+	copy(id[:], b)
+	return id
+}
+
+func fetchKey(to string) (saltyim.Addr, error) {
+	log("fetch key: ", to)
+	addr, err := saltyim.LookupAddr(to)
+	if err != nil {
+		return nil, err
+	}
+	log(addr.Endpoint())
+
+	return addr, nil
 }
 
 var (
