@@ -11,27 +11,27 @@
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "./cmd/ratchet",
-            "args":["offer", "bob@sour.is", "--key", "../../alice.key", "--state", "../../tmp"]
-        }, 
+            "program": ".",
+            "args":["offer", "bob@sour.is", "--key", "alice.key", "--state", "tmp"]
+        },
 
         {
             "name": "receive offer",
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "./cmd/ratchet",
-            "args":["recv", "--key", "../../bob.key", "--state", "../../tmp", "--msg-file", "../../offer.msg"]
+            "program": ".",
+            "args":["recv", "--key", "bob.key", "--state", "tmp", "--msg-file", "offer.msg"]
         },
 
- 
+
         {
             "name": "receive ack",
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "./cmd/ratchet",
-            "args":["recv", "--key", "../../alice.key", "--state", "../../tmp", "--msg-file", "../../ack.msg"]
+            "program": ".",
+            "args":["recv", "--key", "alice.key", "--state", "tmp", "--msg-file", "ack.msg"]
         },
 
         {
@@ -39,8 +39,8 @@
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "./cmd/ratchet",
-            "args":["--them", "bob@sour.is", "--key", "../../alice.key", "--state", "../../tmp", "chat"]
+            "program": ".",
+            "args":["--them", "bob@sour.is", "--key", "alice.key", "--state", "tmp", "chat"]
         },
 
         {
@@ -48,8 +48,8 @@
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "./cmd/ratchet",
-            "args":["--key", "../../bob.key", "--state", "../../tmp", "--msg-file", "../../send1.msg", "recv"]
+            "program": ".",
+            "args":["--key", "bob.key", "--state", "tmp", "--msg-file", "send1.msg", "recv"]
         },
 
         {
@@ -57,8 +57,8 @@
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "./cmd/ratchet",
-            "args":["--key", "../../bob.key", "--state", "../../tmp", "--msg-file", "../../send1.msg", "send", "alice@sour.is"]
+            "program": ".",
+            "args":["--key", "bob.key", "--state", "tmp", "--msg-file", "send1.msg", "send", "alice@sour.is"]
         }
 
     ]

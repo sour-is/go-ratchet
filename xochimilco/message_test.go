@@ -100,12 +100,12 @@ func TestSeal(t *testing.T) {
 		uuid:  []uint8{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
 		nick:  []uint8("bob@sour.is"),
 	}
-	s, err := Seal(m, bobPub[:32])
+	s, err := Seal(m, bobPub)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	tm, err := s.Unseal(bobPub, bobPriv)
+	tm, err := s.Unseal(bobPriv, bobPub)
 
 	if err != nil {
 		t.Fatal(err)

@@ -13,9 +13,9 @@ import (
 	"os"
 	"path/filepath"
 
+	"git.mills.io/saltyim/ratchet/xochimilco"
 	"github.com/keys-pub/keys"
 	"github.com/oklog/ulid/v2"
-	"github.com/sour-is/xochimilco"
 	"go.mills.io/saltyim"
 )
 
@@ -111,7 +111,7 @@ func (s *Session) ReceiveMsg(msg xochimilco.Msg) (isEstablished, isClosed bool, 
 	return
 }
 func (s *Session) Offer() (string, error) {
-	return s.Session.OfferSealed(s.PeerKey.X25519PublicKey().Bytes())
+	return s.Session.OfferSealed(s.PeerKey.X25519PublicKey().Bytes32())
 }
 
 type DiskSessionManager struct {

@@ -38,7 +38,6 @@ type (
 
 type model struct {
 	me        string
-	them      string
 	content   *strings.Builder
 	ready     bool
 	viewport  viewport.Model
@@ -97,10 +96,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// we can initialize the viewport. The initial dimensions come in
 			// quickly, though asynchronously, which is why we wait for them
 			// here.
+
 			m.viewport = viewport.New(msg.Width, msg.Height-verticalMarginHeight)
 			m.viewport.YPosition = headerHeight
+			m.viewport.Width = msg.Width - 10
 			m.viewport.HighPerformanceRendering = useHighPerformanceRenderer
-			m.viewport.SetContent(m.content.String())
+			m.viewport.SetContent("viewport" + m.content.String())
 			m.ready = true
 
 			// This is only necessary for high performance rendering, which in
@@ -109,7 +110,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Render the viewport one line below the header.
 			m.viewport.YPosition = headerHeight + 1
 		} else {
-			m.viewport.Width = msg.Width
+			m.viewport.Width = msg.Width - 10
 			m.viewport.Height = msg.Height - verticalMarginHeight
 		}
 
@@ -157,9 +158,8 @@ func (m model) headerView() string {
 
 func (m model) footerView() string {
 	// info := infoStyle.Render(fmt.Sprintf("%3.f%%", m.viewport.ScrollPercent()*100))
-	info := infoStyle.Render(m.them)
-	line := strings.Repeat("─", max(0, m.viewport.Width-lipgloss.Width(info)))
-	return lipgloss.JoinHorizontal(lipgloss.Center, line, info)
+	line := strings.Repeat("─", max(0, m.viewport.Width))
+	return lipgloss.JoinHorizontal(lipgloss.Center, line)
 }
 
 func max(a, b int) int {

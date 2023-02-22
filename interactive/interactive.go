@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"git.mills.io/saltyim/ratchet/client"
 	"github.com/oklog/ulid/v2"
-	"github.com/sour-is/xochimilco/cmd/ratchet/client"
 )
 
 type service struct {

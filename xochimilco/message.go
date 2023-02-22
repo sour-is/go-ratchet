@@ -308,7 +308,7 @@ func (msg *closeMessage) UnmarshalBinary(data []byte) (err error) {
 
 type sealedMessage []byte
 
-func Seal(m encoding.BinaryMarshaler, k []byte) (out sealedMessage, err error) {
+func Seal(m encoding.BinaryMarshaler, key *[32]byte) (out sealedMessage, err error) {
 	var data []byte
 
 	data, err = m.MarshalBinary()
@@ -330,10 +330,7 @@ func Seal(m encoding.BinaryMarshaler, k []byte) (out sealedMessage, err error) {
 		return
 	}
 
-	var key [32]byte
-	copy(key[:], k)
-
-	return box.SealAnonymous(nil, data, &key, nil)
+	return box.SealAnonymous(nil, data, key, nil)
 }
 
 func (s sealedMessage) Unseal(priv, pub *[32]byte) (m Msg, err error) {

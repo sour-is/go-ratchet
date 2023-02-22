@@ -12,8 +12,8 @@ import (
 	"fmt"
 
 	"github.com/oklog/ulid"
-	"github.com/sour-is/xochimilco/doubleratchet"
-	"github.com/sour-is/xochimilco/x3dh"
+	"git.mills.io/saltyim/ratchet/doubleratchet"
+	"git.mills.io/saltyim/ratchet/x3dh"
 )
 
 // Session between two parties to exchange encrypted messages.
@@ -134,7 +134,7 @@ func (sess *Session) Offer() (offerMsg string, err error) {
 	return
 }
 
-func (sess *Session) OfferSealed(k []byte) (offerMsg string, err error) {
+func (sess *Session) OfferSealed(k *[32]byte) (offerMsg string, err error) {
 	offer, err := sess.createOffer()
 	if err != nil {
 		return
@@ -206,7 +206,7 @@ func (sess *Session) receiveOffer(offer *offerMessage) (isEstablished bool, ackM
 		return
 	}
 
-	// This will be padded up to 32 bytes for AES-256.
+	// This will be padded up to 100 bytes for AES-256.
 	initialPayload := make([]byte, 23)
 	copy(initialPayload[:16], sess.LocalUUID)
 	if _, err = rand.Read(initialPayload[16:]); err != nil {
@@ -354,6 +354,6 @@ func (sess *Session) Close() (closeMsg string, err error) {
 func encTime(in []byte) []byte {
 	u := ulid.ULID{}
 	copy(u[:], in)
-	u.SetTime(ulid.Now())
+	_ = u.SetTime(ulid.Now())
 	return u[:]
 }

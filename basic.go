@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -10,10 +9,10 @@ import (
 	"os"
 	"strings"
 
+	"git.mills.io/saltyim/ratchet/session"
+	"git.mills.io/saltyim/ratchet/xochimilco"
 	"github.com/keys-pub/keys"
 	"github.com/oklog/ulid/v2"
-	"github.com/sour-is/xochimilco"
-	"github.com/sour-is/xochimilco/cmd/ratchet/session"
 	"go.mills.io/saltyim"
 )
 
@@ -33,7 +32,7 @@ func doOffer(ctx context.Context, opts opts) error {
 	if err != nil {
 		return fmt.Errorf("read session: %w", err)
 	}
-	msg, err := sess.OfferSealed(sess.PeerKey.X25519PublicKey().Bytes())
+	msg, err := sess.OfferSealed(sess.PeerKey.X25519PublicKey().Bytes32())
 	if err != nil {
 		return err
 	}
@@ -130,9 +129,6 @@ func doRecv(ctx context.Context, opts opts) error {
 	if sealed, ok := msg.(interface {
 		Unseal(priv, pub *[32]byte) (xochimilco.Msg, error)
 	}); ok {
-		joined := make([]byte, 64)
-		copy(joined, key.X25519Key().Private())
-		copy(joined[32:], key.X25519Key().Public())
 		msg, err = sealed.Unseal(
 			key.X25519Key().Bytes32(),
 			key.PublicKey().X25519PublicKey().Bytes32(),
@@ -176,15 +172,15 @@ func doRecv(ctx context.Context, opts opts) error {
 		return sm.Delete(sess)
 	case isEstablished:
 		log("GOT: session established with ", sess.Name, "...")
-		if len(plaintext) > 0 {
-			fmt.Println(string(plaintext))
+		if len(sess.PendingAck) > 0 {
+			fmt.Println(sess.PendingAck)
 			if opts.Post {
 				addr, err := saltyim.LookupAddr(opts.Them)
 				if err != nil {
 					return err
 				}
 
-				_, err = http.DefaultClient.Post(addr.Endpoint().String(), "text/plain", bytes.NewReader(plaintext))
+				_, err = http.DefaultClient.Post(addr.Endpoint().String(), "text/plain", strings.NewReader(sess.PendingAck))
 				if err != nil {
 					return err
 				}

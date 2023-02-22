@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"git.mills.io/saltyim/ratchet/xochimilco"
 	"github.com/matryer/is"
-	"github.com/sour-is/xochimilco"
 )
 
 func TestSession(t *testing.T) {

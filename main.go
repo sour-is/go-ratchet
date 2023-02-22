@@ -6,13 +6,14 @@ import (
 	"os"
 	"os/signal"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/docopt/docopt-go"
 	"github.com/oklog/ulid/v2"
 
-	"github.com/sour-is/xochimilco/cmd/ratchet/client"
-	"github.com/sour-is/xochimilco/cmd/ratchet/interactive"
-	"github.com/sour-is/xochimilco/cmd/ratchet/session"
-	"github.com/sour-is/xochimilco/cmd/ratchet/xdg"
+	"git.mills.io/saltyim/ratchet/client"
+	"git.mills.io/saltyim/ratchet/interactive"
+	"git.mills.io/saltyim/ratchet/session"
+	"git.mills.io/saltyim/ratchet/xdg"
 )
 
 var usage = `Rachet Chat.
@@ -23,7 +24,7 @@ Usage:
   ratchet [options] ui
 
 Args:
-  <them>             Receiver acct name to use in offer. 
+  <them>             Receiver acct name to use in offer.
 
 Options:
   --key <key>        Sender private key [default: ` + xdg.Get(xdg.EnvConfigHome, "rachet/$USER.key") + `]
@@ -112,7 +113,9 @@ func run(ctx context.Context, opts opts) error {
 		return interactive.New(c).Run(ctx, me, opts.Them)
 
 	case opts.UI:
-		return nil
+		p := tea.NewProgram(initialModel())
+		_, err := p.Run()
+		return err
 
 	default:
 		log(usage)
