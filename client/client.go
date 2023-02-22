@@ -69,6 +69,9 @@ func NewClient(sm SessionManager, me string) (*Client, error) {
 func (c *Client) Run(ctx context.Context) error {
 	return c.sub.Run(ctx)
 }
+func (c *Client) Me() saltyim.Addr {
+	return c.addr
+}
 
 func On[T any](c *Client, fn func(context.Context, T)) {
 	var id T
@@ -401,15 +404,12 @@ func (c *Client) sendMsg(session *session.Session, msg string) error {
 	return nil
 }
 func readMsg(input string) (id ulid.ULID, msg xochimilco.Msg, err error) {
-	// log(input)
-
 	msg, err = xochimilco.Parse(input)
 	if err != nil {
 		return
 	}
 
 	copy(id[:], msg.ID())
-
 	return
 }
 func toULID(b []byte) ulid.ULID {

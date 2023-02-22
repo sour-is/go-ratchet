@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/docopt/docopt-go"
 	"github.com/oklog/ulid/v2"
+	"golang.org/x/sync/errgroup"
 
 	"git.mills.io/saltyim/ratchet/client"
 	"git.mills.io/saltyim/ratchet/interactive"
@@ -113,9 +114,51 @@ func run(ctx context.Context, opts opts) error {
 		return interactive.New(c).Run(ctx, me, opts.Them)
 
 	case opts.UI:
-		p := tea.NewProgram(initialModel())
-		_, err := p.Run()
-		return err
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+
+		me, key, err := readSaltyIdentity(opts.Key)
+		if err != nil {
+			return fmt.Errorf("reading keyfile: %w", err)
+		}
+
+		sm, close, err := session.NewSessionManager(opts.State, me, key)
+		if err != nil {
+			return err
+		}
+		defer close()
+
+		c, err := client.NewClient(sm, me)
+		if err != nil {
+			return err
+		}
+		c.BaseCTX = func() context.Context { return ctx }
+
+		wg, _ := errgroup.WithContext(ctx)
+
+		wg.Go(func() error { return c.Run(ctx) })
+
+		m := initialModel(c, opts.Them)
+		p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseAllMotion())
+
+		client.On(c, func(ctx context.Context, args client.OnOfferSent) { m.Update(args) })
+		client.On(c, func(ctx context.Context, args client.OnOfferReceived) { m.Update(args) })
+		client.On(c, func(ctx context.Context, args client.OnSessionStarted) { m.Update(args) })
+		client.On(c, func(ctx context.Context, args client.OnSessionClosed) { m.Update(args) })
+		client.On(c, func(ctx context.Context, args client.OnMessageReceived) { m.Update(args) })
+		client.On(c, func(ctx context.Context, args client.OnMessageSent) { m.Update(args) })
+		client.On(c, func(ctx context.Context, args client.OnSaltySent) { m.Update(args) })
+		client.On(c, func(ctx context.Context, args client.OnSaltyTextReceived) { m.Update(args) })
+		client.On(c, func(ctx context.Context, args client.OnSaltyEventReceived) { m.Update(args) })
+		client.On(c, func(ctx context.Context, args client.OnOtherReceived) { m.Update(args) })
+
+		wg.Go(func() error {
+			defer cancel()
+			_, err = p.Run()
+			return err
+		})
+
+		return wg.Wait()
 
 	default:
 		log(usage)

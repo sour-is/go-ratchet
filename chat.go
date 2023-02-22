@@ -1,13 +1,17 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"time"
 
+	"git.mills.io/saltyim/ratchet/client"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/oklog/ulid/v2"
 )
 
 // You generally won't need this unless you're processing stuff with
@@ -25,11 +29,11 @@ var (
 		return lipgloss.NewStyle().BorderStyle(b).Padding(0, 1)
 	}()
 
-	infoStyle = func() lipgloss.Style {
-		b := lipgloss.RoundedBorder()
-		b.Left = "┤"
-		return titleStyle.Copy().BorderStyle(b)
-	}()
+	// infoStyle = func() lipgloss.Style {
+	// 	b := lipgloss.RoundedBorder()
+	// 	b.Left = "┤"
+	// 	return titleStyle.Copy().BorderStyle(b)
+	// }()
 )
 
 type (
@@ -37,7 +41,10 @@ type (
 )
 
 type model struct {
-	me        string
+	c *client.Client
+
+	them string
+
 	content   *strings.Builder
 	ready     bool
 	viewport  viewport.Model
@@ -45,21 +52,37 @@ type model struct {
 	err       error
 }
 
-func initialModel() model {
+func initialModel(c *client.Client, them string) model {
+
 	ti := textinput.New()
 	ti.Placeholder = "Message"
+	ti.Prompt = "foo? "
 	ti.Focus()
 	ti.CharLimit = 156
 	ti.Width = 20
 
-	return model{
+	m := model{
+		c:         c,
+		them:      them,
 		content:   &strings.Builder{},
 		textInput: ti,
 	}
+	m.setPrompt()
+
+	return m
 }
 
 func (m model) Init() tea.Cmd {
 	return textinput.Blink
+}
+func (m *model) setPrompt() {
+	prompt := ""
+	if m.them == "" {
+		prompt = fmt.Sprintf("%s> ", m.c.Me().String())
+	} else {
+		prompt = fmt.Sprintf("%s -> %s> ", m.c.Me().String(), m.them)
+	}
+	m.textInput.Prompt = prompt
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -69,19 +92,117 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	)
 
 	switch msg := msg.(type) {
+	case client.OnMessageReceived:
+		fmt.Fprintf(m.content, "\033[90m%s <\033[31m%s\033[90m> \033[0m%s\n", getTime(msg.ID).Format("15:04:05"), msg.Them, msg.Msg)
+
+	case client.OnMessageSent:
+		fmt.Fprintf(m.content, "\033[90m%s <\033[31m%s\033[90m> \033[0m%s\n", getTime(msg.ID).Format("15:04:05"), m.c.Me().String(), msg.Msg)
+
+	case client.OnSaltyTextReceived:
+		fmt.Fprintf(m.content, "\033[90m%s <\033[34m%s\033[90m> \033[0m%s\n", time.Now().Format("15:04:05"), msg.Msg.User, msg.Msg.LiteralText())
+
+	case client.OnSaltyEventReceived:
+		fmt.Fprintf(m.content, "\033[90m%s <\033[34m%s\033[90m> \033[0m%s\n", time.Now().Format("15:04:05"), msg.Event.Command, strings.Join(msg.Event.Args, ", "))
+
+	case client.OnSaltySent:
+		fmt.Fprintf(m.content, "\033[90m%s <\033[34m%s\033[90m> \033[0m%s\n", time.Now().Format("15:04:05"), m.c.Me().String(), msg.Msg)
+
+	case client.OnOfferSent:
+		fmt.Fprintf(m.content, "\033[90m%s ::: offer sent %s :::\033[0m\n", getTime(msg.ID).Format("15:04:05"), msg.Them)
+
+	case client.OnOfferReceived:
+		fmt.Fprintf(m.content, "\033[90m%s ::: offer received %s :::\033[0m\n", getTime(msg.ID).Format("15:04:05"), msg.Them)
+
+	case client.OnSessionStarted:
+		fmt.Fprintf(m.content, "\033[90m%s ::: session started %s :::\033[0m\n", getTime(msg.ID).Format("15:04:05"), msg.Them)
+
+	case client.OnSessionClosed:
+		fmt.Fprintf(m.content, "\033[90m%s ::: session closed %s :::\033[0m\n", getTime(msg.ID).Format("15:04:05"), msg.Them)
+
+	case client.OnOtherReceived:
+		fmt.Fprintf(m.content, "\033[90m%s ::: unknown message: %s\033[0m\n", time.Now().Format("15:04:05"), msg.Raw)
+
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyCtrlC, tea.KeyEsc:
 			return m, tea.Quit
-		case tea.KeyEnter:
-			m.content.WriteString(m.me)
-			m.content.WriteString(": ")
-			m.content.WriteString(m.textInput.Value())
-			m.content.WriteRune('\n')
-			m.textInput.SetValue("")
 
-			m.viewport.SetContent(m.content.String())
+		case tea.KeyEnter:
+			input := m.textInput.Value()
+			if input == "" {
+				break
+			}
+
+			m.textInput.SetValue("")
 			m.viewport.GotoBottom()
+			ctx := m.c.BaseCTX()
+
+			if strings.HasPrefix(input, "/chat") {
+				sp := strings.Fields(input)
+				// handle show list of open sessions
+				if len(sp) <= 1 {
+					err := m.c.Use(ctx, func(ctx context.Context, sm client.SessionManager) error {
+						log("usage: /chat|close username")
+						for _, p := range sm.Sessions() {
+							log("sess: ", p.Name)
+						}
+						return nil
+					})
+					if err != nil {
+						fmt.Fprintf(m.content, "ERR: %s\n", err)
+					}
+				}
+
+				if m.c.Me().String() == sp[1] {
+					fmt.Fprintln(m.content, "ERR: cant racthet with self")
+				}
+
+				m.them = sp[1]
+				m.setPrompt()
+
+				_, err := m.c.Chat(ctx, m.them)
+				if err != nil {
+					fmt.Fprintf(m.content, "ERR: %s\n", err)
+				}
+				break
+			}
+			if strings.HasPrefix(input, "/close") {
+				sp := strings.Fields(input)
+
+				target := m.them
+
+				if len(sp) > 1 {
+					target = sp[1]
+				}
+
+				if target == "" {
+					break
+				}
+
+				m.them = ""
+				m.setPrompt()
+
+				err := m.c.Close(ctx, target)
+				if err != nil {
+					fmt.Fprintf(m.content, "ERR: %s\n", err)
+				}
+				break
+			}
+			if strings.HasPrefix(input, "/salty") {
+				target, msg, _ := strings.Cut(strings.TrimPrefix(input, "/salty "), " ")
+				err := m.c.SendSalty(ctx, target, msg)
+				if err != nil {
+					fmt.Fprintln(m.content, "ERR: ", err)
+				}
+				break
+			}
+
+			if m.them == "" {
+				fmt.Fprintln(m.content, "usage: /chat username")
+				break
+			}
+
+			m.c.Send(ctx, m.them, input)
 		}
 
 	case tea.WindowSizeMsg:
@@ -91,6 +212,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		verticalMarginHeight := headerHeight + footerHeight + inputHeight
 
 		if !m.ready {
+			m.textInput.Width = msg.Width
+
 			// Since this program is using the full size of the viewport we
 			// need to wait until we've received the window dimensions before
 			// we can initialize the viewport. The initial dimensions come in
@@ -99,9 +222,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			m.viewport = viewport.New(msg.Width, msg.Height-verticalMarginHeight)
 			m.viewport.YPosition = headerHeight
-			m.viewport.Width = msg.Width - 10
+			m.viewport.Width = msg.Width
 			m.viewport.HighPerformanceRendering = useHighPerformanceRenderer
-			m.viewport.SetContent("viewport" + m.content.String())
+			m.viewport.SetContent(m.content.String())
+			m.viewport.MouseWheelEnabled = true
 			m.ready = true
 
 			// This is only necessary for high performance rendering, which in
@@ -128,6 +252,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Handle keyboard and mouse events in the viewport
+	m.viewport.SetContent(m.content.String())
+
 	m.viewport, cmd = m.viewport.Update(msg)
 	cmds = append(cmds, cmd)
 
@@ -167,4 +293,8 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func getTime(u ulid.ULID) time.Time {
+	return time.UnixMilli(int64(u.Time()))
 }

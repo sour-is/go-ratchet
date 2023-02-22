@@ -59,7 +59,7 @@ func (svc *service) Interactive(ctx context.Context, me, them string) {
 		fmt.Printf("\033[1A\r\033[2K%s <\033[34m%s\033[0m> %s\n", time.Now().Format("15:04:05"), me, args.Msg)
 	})
 	client.On(svc.Client, func(ctx context.Context, args client.OnSaltyTextReceived) {
-		fmt.Printf("\n\033[1A\r\033[2K%s <\033[34m%s\033[0m> %s\n", args.Msg.Timestamp.DateTime().Format("15:04:05"), args.Msg.User, args.Msg.LiteralText())
+		fmt.Printf("\n\033[1A\r\033[2K%s <\033[34m%s\033[0m> %s\n", time.Now().Format("15:04:05"), args.Msg.User, args.Msg.LiteralText())
 		fmt.Printf(svc.prompt)
 	})
 	client.On(svc.Client, func(ctx context.Context, args client.OnSaltyEventReceived) {

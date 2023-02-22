@@ -4,7 +4,12 @@ ALICE_KEY=alice.key
 BOB=bob@sour.is
 BOB_KEY=bob.key
 
-run:
+ui:
+	go build . && ./ratchet ui --key $(ALICE_KEY) --state ./tmp
+
+
+
+simulate:
 	@rm -rf ./tmp
 	@chmod 400 *.key
 	@echo Alice starts by offering Bob to upgrade the connection.
@@ -16,7 +21,6 @@ run:
 	@echo
 	go run . --key $(BOB_KEY) --state ./tmp --msg-file offer.msg recv | tee ack.msg
 
-foo:
 	@echo
 	@echo "Alice evaluates Bob's acknowledgement."
 	@echo

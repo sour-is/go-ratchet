@@ -207,7 +207,7 @@ func (sm *DiskSessionManager) Delete(sess *Session) error {
 	copy(u[:], sess.LocalUUID)
 	sh := sessionhash(sm.me, u)
 	filename := filepath.Join(sm.path, sh)
-	log("REMOVE:", filename)
+	// log("REMOVE:", filename)
 	delete(sm.sessions, sess.Name)
 	return os.Remove(filename)
 }
@@ -252,7 +252,7 @@ func (sm *DiskSessionManager) Close() error {
 		return err
 	}
 	defer fp.Close()
-	defer log("Saved Session Data ", name)
+	// defer log("Saved Session Data ", name)
 
 	type item struct {
 		Name    string
@@ -296,9 +296,9 @@ func sessionhash(self string, id ulid.ULID) string {
 	return enc(h.Sum(nil))
 }
 
-func log(a ...any) {
-	fmt.Fprintf(os.Stderr, "\033[90m%s\033[0m\n", fmt.Sprint(a...))
-}
+// func log(a ...any) {
+// 	fmt.Fprintf(os.Stderr, "\033[90m%s\033[0m\n", fmt.Sprint(a...))
+// }
 
 func enc(b []byte) string {
 	return base64.RawURLEncoding.EncodeToString(b)
@@ -311,12 +311,12 @@ func toULID(b []byte) ulid.ULID {
 }
 
 func fetchKey(to string) (saltyim.Addr, error) {
-	log("fetch key: ", to)
+	// log("fetch key: ", to)
 	addr, err := saltyim.LookupAddr(to)
 	if err != nil {
 		return nil, err
 	}
-	log(addr.Endpoint())
+	// log(addr.Endpoint())
 
 	return addr, nil
 }
