@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2023 Jon Lundy <jon@xuu.cc>
+# SPDX-License-Identifier: CC0-1.0
+
 ALICE=alice@sour.is
 ALICE_KEY=alice.key
 

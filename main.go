@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2023 Jon Lundy <jon@xuu.cc>
+// SPDX-License-Identifier: BSD-3-Clause
+
 package main
 
 import (
@@ -9,6 +12,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/docopt/docopt-go"
 	"github.com/oklog/ulid/v2"
+	"github.com/sour-is/ev"
+	diskstore "github.com/sour-is/ev/pkg/es/driver/disk-store"
+	memstore "github.com/sour-is/ev/pkg/es/driver/mem-store"
+	"github.com/sour-is/ev/pkg/es/driver/streamer"
+	"github.com/sour-is/ev/pkg/es/event"
+	"go.uber.org/multierr"
 	"golang.org/x/sync/errgroup"
 
 	"git.mills.io/saltyim/ratchet/client"
@@ -28,9 +37,10 @@ Args:
   <them>             Receiver acct name to use in offer.
 
 Options:
-  --key <key>        Sender private key [default: ` + xdg.Get(xdg.EnvConfigHome, "rachet/$USER.key") + `]
-  --state <state>    Session state path [default: ` + xdg.Get(xdg.EnvDataHome, "rachet") + `]
-  --msg <msg>        Msg to read in. [default to read Standard Input]
+  --key <key>        Sender private key [default: ` + xdg.Get(xdg.EnvConfigHome, "racthet/$USER.key") + `]
+  --state <state>    Session state path [default: ` + xdg.Get(xdg.EnvStateHome, "racthet") + `]
+  --log <logs>       Log storage path   [default: `+ xdg.Get(xdg.EnvDataHome, "ratchet") + `]
+  --msg <msg>        Msg to read in.    [default to read Standard Input]
   --msg-file <file>  File to read input from.
   --msg-stdin        Read standard input.
   --post             Send to msgbus
@@ -49,6 +59,7 @@ type opts struct {
 	Key      string `docopt:"--key"`
 	Session  string `docopt:"--session"`
 	State    string `docopt:"--state"`
+	Log      string `docopt:"--log"`
 	Msg      string `docopt:"--msg"`
 	MsgFile  string `docopt:"--msg-file"`
 	MsgStdin bool   `docopt:"--msg-stdin"`
@@ -175,4 +186,23 @@ func toULID(b []byte) ulid.ULID {
 	var id ulid.ULID
 	copy(id[:], b)
 	return id
+}
+
+func setupChatlog(ctx context.Context, path string) (*ev.EventStore, error){
+	// setup eventstore
+	err := multierr.Combine(
+		ev.Init(ctx),
+		event.Init(ctx),
+		diskstore.Init(ctx),
+		memstore.Init(ctx),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return ev.Open(
+		ctx,
+		path,
+		streamer.New(ctx),
+	)
 }

@@ -1,3 +1,10 @@
+// SPDX-FileCopyrightText: 2023 Jon Lundy <jon@xuu.cc>
+//
+// SPDX-License-Identifier: BSD-3-Clause
+
+// Value Locker implements a lock queue where functions that wish to use a resource
+// are placed in a queue to order utilization and prevent races. The function can 
+// cancel its position using the context.
 package locker
 
 import (

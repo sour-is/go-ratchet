@@ -6,11 +6,6 @@
 
 package doubleratchet
 
-import (
-	"bytes"
-	"encoding/gob"
-)
-
 // dhRatchet represents a Diffie-Hellman ratchet including a KDF based on a
 // common secret / root key to derive the sending and receiving chain keys.
 //
@@ -26,53 +21,6 @@ type dhRatchet struct {
 
 	isActive      bool
 	isInitialized bool
-}
-
-func (dhr *dhRatchet) MarshalBinary() ([]byte, error) {
-	var buf bytes.Buffer
-	o := struct {
-		RootKey   []byte
-		DhPub     []byte
-		DhPriv    []byte
-		PeerDhPub []byte
-
-		IsActive      bool
-		IsInitialized bool
-	}{
-		dhr.rootKey,
-		dhr.dhPub,
-		dhr.dhPriv,
-		dhr.peerDhPub,
-		dhr.isActive,
-		dhr.isInitialized,
-	}
-
-	err := gob.NewEncoder(&buf).Encode(o)
-
-	return buf.Bytes(), err
-}
-
-func (dhr *dhRatchet) UnmarshalBinary(b []byte) error {
-	var o struct {
-		RootKey   []byte
-		DhPub     []byte
-		DhPriv    []byte
-		PeerDhPub []byte
-
-		IsActive      bool
-		IsInitialized bool
-	}
-	err := gob.NewDecoder(bytes.NewReader(b)).Decode(&o)
-
-	dhr.rootKey = o.RootKey
-	dhr.dhPriv = o.DhPriv
-	dhr.dhPub = o.DhPub
-	dhr.dhPriv = o.DhPriv
-	dhr.peerDhPub = o.PeerDhPub
-	dhr.isActive = o.IsActive
-	dhr.isInitialized = o.IsInitialized
-
-	return err
 }
 
 // dhRatchetActive creates a DH ratchet for the active peer, Alice.
