@@ -7,6 +7,11 @@ ALICE_KEY=alice.key
 BOB=bob@sour.is
 BOB_KEY=bob.key
 
+
+test: ## Run test suite
+	@go test -failfast -shuffle on -race -cover -coverprofile=coverage.out ./...
+
+
 ui:
 	go build . && ./ratchet ui --key $(ALICE_KEY) --state ./tmp
 
