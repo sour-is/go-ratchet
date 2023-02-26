@@ -7,9 +7,8 @@ import (
 	"context"
 	"testing"
 
+	"git.mills.io/saltyim/ratchet/locker"
 	"github.com/matryer/is"
-
-	"github.com/sour-is/ev/pkg/locker"
 )
 
 type config struct {
@@ -25,22 +24,29 @@ func TestLocker(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	err := value.Modify(ctx, func(ctx context.Context, c *config) error {
+	err := value.Use(ctx, func(ctx context.Context, c *config) error {
 		c.Value = "one"
 		c.Counter++
 		return nil
 	})
 	is.NoErr(err)
 
-	c, err := value.Copy(context.Background())
+	var cp *config
+	 err = value.Use(context.Background(), func(ctx context.Context, c *config) error {
+		cp = &config{
+			Value: c.Value,
+			Counter: c.Counter,
+		}
+		return nil
+	})
 
 	is.NoErr(err)
-	is.Equal(c.Value, "one")
-	is.Equal(c.Counter, 1)
+	is.Equal(cp.Value, "one")
+	is.Equal(cp.Counter, 1)
 
 	wait := make(chan struct{})
 
-	go value.Modify(ctx, func(ctx context.Context, c *config) error {
+	go value.Use(ctx, func(ctx context.Context, c *config) error {
 		c.Value = "two"
 		c.Counter++
 		close(wait)
@@ -50,16 +56,22 @@ func TestLocker(t *testing.T) {
 	<-wait
 	cancel()
 
-	err = value.Modify(ctx, func(ctx context.Context, c *config) error {
+	err = value.Use(ctx, func(ctx context.Context, c *config) error {
 		c.Value = "three"
 		c.Counter++
 		return nil
 	})
 	is.True(err != nil)
 
-	c, err = value.Copy(context.Background())
+	err = value.Use(context.Background(), func(ctx context.Context, c *config) error {
+		cp = &config{
+			Value: c.Value,
+			Counter: c.Counter,
+		}
+		return nil
+	})
 
 	is.NoErr(err)
-	is.Equal(c.Value, "two")
-	is.Equal(c.Counter, 2)
+	is.Equal(cp.Value, "two")
+	is.Equal(cp.Counter, 2)
 }

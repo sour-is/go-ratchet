@@ -1,0 +1,81 @@
+---
+kind: pipeline
+type: exec
+name: 🚀 CI
+
+platform:
+  os: linux
+  arch: amd64
+
+steps:
+  - name: 🛠️ Build
+    commands:
+      - make build
+
+  - name: 🧪 Test
+    commands:
+      - make test
+
+trigger:
+  branch:
+    - master
+  event:
+    - tag
+    - push
+    - pull_request
+
+---
+kind: pipeline
+name: 🐳 Docker
+
+steps:
+  - name: 📦 Image
+    image: plugins/kaniko
+    settings:
+      repo: prologic/saltyim
+      tags: latest
+      build_args:
+        - VERSION=latest
+        - COMMIT=${DRONE_COMMIT_SHA:0:8}
+      username:
+        from_secret: dockerhub_username
+      password:
+        from_secret: dockerhub_password
+    when:
+      branch:
+        - master
+      event:
+        - push
+
+depends_on:
+  - 🚀 CI
+
+trigger:
+  branch:
+    - master
+  event:
+    - push
+
+---
+kind: pipeline
+name: 🥳 Done
+
+steps:
+  - name: 🔔 Notify
+    image: plugins/webhook
+    settings:
+      urls:
+        - https://msgbus.mills.io/ci.mills.io
+
+depends_on:
+  - 🚀 CI
+  - 🐳 Docker
+
+trigger:
+  branch:
+    - master
+  event:
+    - tag
+    - push
+    - pull_request
+

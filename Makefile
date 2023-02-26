@@ -7,7 +7,8 @@ ALICE_KEY=alice.key
 BOB=bob@sour.is
 BOB_KEY=bob.key
 
-
+build:
+	@go build .
 test: ## Run test suite
 	@go test -failfast -shuffle on -race -cover -coverprofile=coverage.out ./...
 
