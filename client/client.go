@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"git.mills.io/prologic/msgbus"
 	"git.mills.io/prologic/msgbus/client"
@@ -31,11 +32,19 @@ type SessionManager interface {
 	Sessions() []session.Pair[string, ulid.ULID]
 }
 
+type (
+	Addr   = saltyim.Addr
+	Event  = lextwt.SaltyEvent
+	User   = lextwt.SaltyUser
+	Msg    = lextwt.SaltyText
+	Pubkey = keys.EdX25519PublicKey
+)
+
 type Client struct {
 	BaseCTX func() context.Context
 
 	sm   *locker.Locked[SessionManager]
-	addr saltyim.Addr
+	addr Addr
 	bus  *client.Client
 	sub  *client.Subscriber
 
@@ -110,12 +119,20 @@ type OnSessionStarted struct {
 type OnMessageReceived struct {
 	ID   ulid.ULID
 	Them string
-	Msg  string
+	Raw  string
+	Msg  *Msg
+}
+type OnEventReceived struct {
+	ID   ulid.ULID
+	Them string
+	Raw  string
+	Msg  *Event
 }
 type OnMessageSent struct {
 	ID     ulid.ULID
 	Them   string
-	Msg    string
+	Raw    string
+	Msg    *Msg
 	Sealed string
 }
 type OnSessionClosed struct {
@@ -123,17 +140,18 @@ type OnSessionClosed struct {
 	Them string
 }
 type OnSaltyTextReceived struct {
-	Pubkey *keys.EdX25519PublicKey
-	Msg    *lextwt.SaltyText
+	Pubkey *Pubkey
+	Msg    *Msg
 }
 type OnSaltyEventReceived struct {
-	Pubkey *keys.EdX25519PublicKey
-	Event  *lextwt.SaltyEvent
+	Pubkey *Pubkey
+	Event  *Event
 }
 type OnSaltySent struct {
 	Them string
 	Addr saltyim.Addr
-	Msg  string
+	Msg  *Msg
+	Raw  string
 }
 type OnOtherReceived struct {
 	Raw string
@@ -194,19 +212,25 @@ func (c *Client) Chat(ctx context.Context, them string) (bool, error) {
 		return err
 	})
 }
-func (c *Client) Send(ctx context.Context, them, input string) error {
+func (c *Client) Send(ctx context.Context, them, text string, events ...*Event) error {
 	return c.sm.Use(ctx, func(ctx context.Context, sm SessionManager) error {
 		session, err := sm.Get(sm.ByName(them))
 		if err != nil {
 			return err
 		}
 
-		msg, err := session.Send([]byte(input))
+		msg := lextwt.NewSaltyText(
+			lextwt.NewDateTime(time.Now(), ""),
+			lextwt.NewSaltyUser(c.Me().User(), c.Me().Domain()),
+			toElems(lextwt.NewText(text), events)...,
+		)
+
+		data, err := session.Send([]byte(msg.Literal()))
 		if err != nil {
 			return err
 		}
 
-		err = c.sendMsg(session, msg)
+		err = c.sendMsg(session, data)
 		if err != nil {
 			return err
 		}
@@ -216,7 +240,13 @@ func (c *Client) Send(ctx context.Context, them, input string) error {
 			return err
 		}
 
-		return dispatch(ctx, c, OnMessageSent{toULID(session.LocalUUID), them, input, msg})
+		return dispatch(ctx, c, OnMessageSent{
+			ID:     toULID(session.LocalUUID),
+			Them:   them,
+			Raw:    msg.Literal(),
+			Msg:    msg,
+			Sealed: data,
+		})
 	})
 }
 func (c *Client) Close(ctx context.Context, them string) error {
@@ -249,14 +279,20 @@ func (c *Client) Close(ctx context.Context, them string) error {
 		return err
 	})
 }
-func (c *Client) SendSalty(ctx context.Context, them, msg string) error {
+func (c *Client) SendSalty(ctx context.Context, them, text string, events ...*Event) error {
 	addr, err := saltyim.LookupAddr(them)
 	if err != nil {
 		return err
 	}
 
 	return c.sm.Use(ctx, func(ctx context.Context, sm SessionManager) error {
-		b, err := salty.Encrypt(sm.Identity(), saltyim.PackMessage(c.addr, msg), []string{addr.Key().ID().String()})
+		msg := lextwt.NewSaltyText(
+			lextwt.NewDateTime(time.Now(), ""),
+			lextwt.NewSaltyUser(addr.User(), addr.Domain()),
+			toElems(lextwt.NewText(text), events)...,
+		)
+
+		b, err := salty.Encrypt(sm.Identity(), []byte(msg.Literal()), []string{addr.Key().ID().String()})
 		if err != nil {
 			return fmt.Errorf("error encrypting message to %s: %w", addr, err)
 		}
@@ -266,7 +302,12 @@ func (c *Client) SendSalty(ctx context.Context, them, msg string) error {
 			return err
 		}
 
-		return dispatch(ctx, c, OnSaltySent{them, addr, msg})
+		return dispatch(ctx, c, OnSaltySent{
+			Them: them, 
+			Addr: addr, 
+			Raw: msg.Literal(), 
+			Msg: msg,
+		})
 	})
 }
 
@@ -318,7 +359,7 @@ func (c *Client) msgbusHandler(in *msgbus.Message) error {
 		return dispatch(ctx, c, OnOtherReceived{input})
 	}
 
-	id, msg, err := readMsg(input)
+	id, xmsg, err := readMsg(input)
 	if err != nil {
 		return fmt.Errorf("reading msg: %w", err)
 	}
@@ -330,10 +371,10 @@ func (c *Client) msgbusHandler(in *msgbus.Message) error {
 		}
 
 		// unseal message if required.
-		if sealed, ok := msg.(interface {
+		if sealed, ok := xmsg.(interface {
 			Unseal(priv, pub *[32]byte) (m xochimilco.Msg, err error)
 		}); ok {
-			msg, err = sealed.Unseal(
+			xmsg, err = sealed.Unseal(
 				sm.Identity().X25519Key().Bytes32(),
 				sm.Identity().X25519Key().PublicKey().Bytes32(),
 			)
@@ -345,14 +386,14 @@ func (c *Client) msgbusHandler(in *msgbus.Message) error {
 		var sess *session.Session
 
 		// offer messages have a nick embeded in the payload.
-		if offer, ok := msg.(interface {
+		if offer, ok := xmsg.(interface {
 			Nick() string
 		}); ok {
 			sess, err = sm.New(offer.Nick())
 			if err != nil {
 				return fmt.Errorf("get session: %w", err)
 			}
-			err = dispatch(ctx, c, OnOfferReceived{toULID(msg.ID()), offer.Nick()})
+			err = dispatch(ctx, c, OnOfferReceived{toULID(xmsg.ID()), offer.Nick()})
 			if err != nil {
 				return err
 			}
@@ -370,7 +411,7 @@ func (c *Client) msgbusHandler(in *msgbus.Message) error {
 			return nil
 		}
 
-		isEstablished, isClosed, plaintext, err := sess.ReceiveMsg(msg)
+		isEstablished, isClosed, plaintext, err := sess.ReceiveMsg(xmsg)
 		if err != nil {
 			return fmt.Errorf("session receive: %w", err)
 		}
@@ -387,12 +428,33 @@ func (c *Client) msgbusHandler(in *msgbus.Message) error {
 				return err
 			}
 
-			return dispatch(ctx, c, OnSessionClosed{toULID(msg.ID()), sess.Name})
+			return dispatch(ctx, c, OnSessionClosed{toULID(xmsg.ID()), sess.Name})
 		case isEstablished:
-			return dispatch(ctx, c, OnSessionStarted{toULID(msg.ID()), sess.Name})
+			return dispatch(ctx, c, OnSessionStarted{toULID(xmsg.ID()), sess.Name})
 		}
 
-		return dispatch(ctx, c, OnMessageReceived{toULID(msg.ID()), sess.Name, string(plaintext)})
+		msg, _ := lextwt.ParseSalty(string(plaintext))
+
+		switch msg := msg.(type) {
+		case *Msg:
+			return dispatch(ctx, c, OnMessageReceived{
+				ID: toULID(xmsg.ID()), 
+				Them: sess.Name, 
+				Raw: string(plaintext),
+				Msg: msg,
+			})
+	
+		case *Event:
+			return dispatch(ctx, c, OnEventReceived{
+				ID: toULID(xmsg.ID()), 
+				Them: sess.Name, 
+				Raw: string(plaintext),
+				Msg: msg,
+			})
+
+		}
+
+		return nil
 	})
 }
 
@@ -416,4 +478,13 @@ func toULID(b []byte) ulid.ULID {
 	var id ulid.ULID
 	copy(id[:], b)
 	return id
+}
+
+func toElems(e lextwt.Elem, events []*Event) []lextwt.Elem {
+	lis := make([]lextwt.Elem, 0, len(events)+1)
+	lis = append(lis, e)
+	for i := range events {
+		lis = append(lis, events[i])
+	}
+	return lis
 }

@@ -5,7 +5,7 @@ go 1.19
 require (
 	github.com/docopt/docopt-go v0.0.0-20180111231733-ee0de3bc6815
 	go.mills.io/saltyim v0.0.0-20230128070719-15a64de82829
-	golang.org/x/crypto v0.5.0
+	golang.org/x/crypto v0.6.0
 	golang.org/x/sync v0.1.0
 )
 
@@ -56,7 +56,7 @@ require (
 	go.opentelemetry.io/proto/otlp v0.18.0 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/multierr v1.8.0 // indirect
-	golang.org/x/term v0.4.0 // indirect
+	golang.org/x/term v0.5.0 // indirect
 	google.golang.org/genproto v0.0.0-20211118181313-81c1377c94b1 // indirect
 	google.golang.org/grpc v1.46.2 // indirect
 )
@@ -116,11 +116,11 @@ require (
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/writeas/go-strip-markdown/v2 v2.1.1 // indirect
 	go.mills.io/salty v0.0.0-20220322161301-ce2b9f6573fa
-	go.yarn.social/lextwt v0.0.0-20221221200320-31bca76a2587
-	go.yarn.social/types v0.0.0-20221027173319-2d00e96a95c1 // indirect
-	golang.org/x/net v0.5.0 // indirect
-	golang.org/x/sys v0.4.0 // indirect
-	golang.org/x/text v0.6.0 // indirect
+	go.yarn.social/lextwt v0.0.0-20230226040904-0097db79a25e
+	go.yarn.social/types v0.0.0-20230129042829-96789c694b24 // indirect
+	golang.org/x/net v0.6.0 // indirect
+	golang.org/x/sys v0.5.0 // indirect
+	golang.org/x/text v0.7.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/protobuf v1.28.1 // indirect
 	nhooyr.io/websocket v1.8.7 // indirect

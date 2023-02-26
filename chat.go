@@ -93,19 +93,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case client.OnMessageReceived:
-		fmt.Fprintf(m.content, "\033[90m%s <\033[31m%s\033[90m> \033[0m%s\n", getTime(msg.ID).Format("15:04:05"), msg.Them, msg.Msg)
+		for _, e := range msg.Msg.Events {
+			fmt.Fprintf(m.content, "\033[90m%s :: \033[34m%s\033[90m: \033[0m%s\n", time.Now().Format("15:04:05"), e.Command, strings.Join(e.Args, ", "))
+		}
+		fmt.Fprintf(m.content, "\033[90m%s <\033[31m%s\033[90m> \033[0m%s\n", msg.Msg.Timestamp.DateTime().Format("15:04:05"), msg.Them, msg.Msg.LiteralText())
 
 	case client.OnMessageSent:
-		fmt.Fprintf(m.content, "\033[90m%s <\033[31m%s\033[90m> \033[0m%s\n", getTime(msg.ID).Format("15:04:05"), m.c.Me().String(), msg.Msg)
+		fmt.Fprintf(m.content, "\033[90m%s <\033[31m%s\033[90m> \033[0m%s\n", msg.Msg.Timestamp.DateTime().Format("15:04:05"), m.c.Me().String(), msg.Msg.LiteralText())
 
 	case client.OnSaltyTextReceived:
-		fmt.Fprintf(m.content, "\033[90m%s <\033[34m%s\033[90m> \033[0m%s\n", time.Now().Format("15:04:05"), msg.Msg.User, msg.Msg.LiteralText())
+		fmt.Fprintf(m.content, "\033[90m%s <\033[34m%s\033[90m> \033[0m%s\n", msg.Msg.Timestamp.DateTime().Format("15:04:05"), msg.Msg.User, msg.Msg.LiteralText())
 
 	case client.OnSaltyEventReceived:
-		fmt.Fprintf(m.content, "\033[90m%s <\033[34m%s\033[90m> \033[0m%s\n", time.Now().Format("15:04:05"), msg.Event.Command, strings.Join(msg.Event.Args, ", "))
+		fmt.Fprintf(m.content, "\033[90m%s :: \033[34m%s\033[90m: \033[0m%s\n", time.Now().Format("15:04:05"), msg.Event.Command, strings.Join(msg.Event.Args, ", "))
 
 	case client.OnSaltySent:
-		fmt.Fprintf(m.content, "\033[90m%s <\033[34m%s\033[90m> \033[0m%s\n", time.Now().Format("15:04:05"), m.c.Me().String(), msg.Msg)
+		fmt.Fprintf(m.content, "\033[90m%s <\033[34m%s\033[90m> \033[0m%s\n", msg.Msg.Timestamp.DateTime().Format("15:04:05"), m.c.Me().String(), msg.Msg.LiteralText())
 
 	case client.OnOfferSent:
 		fmt.Fprintf(m.content, "\033[90m%s ::: offer sent %s :::\033[0m\n", getTime(msg.ID).Format("15:04:05"), msg.Them)
@@ -234,7 +237,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Render the viewport one line below the header.
 			m.viewport.YPosition = headerHeight + 1
 		} else {
-			m.viewport.Width = msg.Width - 10
+			m.viewport.Width = msg.Width
 			m.viewport.Height = msg.Height - verticalMarginHeight
 		}
 
