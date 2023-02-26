@@ -1,5 +1,8 @@
 # Ratchet Chat
 
+[![Go Reference](https://pkg.go.dev/badge/git.mills.io/saltyim/ratchet.svg)](https://pkg.go.dev/git.mills.io/saltyim/ratchet)
+[![REUSE status](https://api.reuse.software/badge/git.mills.io/saltyim/ratchet)](https://api.reuse.software/info/git.mills.io/saltyim/ratchet)
+
 Ratchet is a chat client that utilizes X3DH Double Ratchet protocols over the salty msgbus to ensure E2E encryption
 with forward secrecy and self healing properties.
 
@@ -156,10 +159,6 @@ Message Content
 
 
 ## Xochimilco
-
-[![Go Reference](https://pkg.go.dev/badge/git.mills.io/saltyim/ratchet.svg)](https://pkg.go.dev/git.mills.io/saltyim/ratchet)
-[![Go](https://git.mills.io/saltyim/ratchet/actions/workflows/go.yml/badge.svg)](https://git.mills.io/saltyim/ratchet/actions/workflows/go.yml)
-[![REUSE status](https://api.reuse.software/badge/git.mills.io/saltyim/ratchet)](https://api.reuse.software/info/git.mills.io/saltyim/ratchet)
 
 An implementation of the [Signal Protocols][signal-docs] [X3DH][signal-x3dh] and [Double Ratchet][signal-double-ratchet].
 Plus a simple straightforward usable E2E encryption library build on top, named Xochimilco.

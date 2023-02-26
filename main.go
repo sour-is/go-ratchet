@@ -26,7 +26,7 @@ import (
 	"git.mills.io/saltyim/ratchet/xdg"
 )
 
-var usage = `Rachet Chat.
+var usage = `Ratchet Chat.
 Usage:
   ratchet [options] recv
   ratchet [options] (offer|send|close) <them>

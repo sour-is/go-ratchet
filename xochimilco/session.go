@@ -77,7 +77,7 @@ func (sess *Session) MarshalBinary() ([]byte, error) {
 		Me           string
 		SpkPub       []byte
 		SpkPriv      []byte
-		DoubleRachet []byte
+		DoubleRatchet []byte
 	}{
 		sess.LocalUUID,
 		sess.RemoteUUID,
@@ -97,7 +97,7 @@ func (sess *Session) UnmarshalBinary(b []byte) error {
 		Me           string
 		SpkPub       []byte
 		SpkPriv      []byte
-		DoubleRachet []byte
+		DoubleRatchet []byte
 	}
 	err := gob.NewDecoder(bytes.NewReader(b)).Decode(&o)
 	if err != nil {
@@ -109,9 +109,9 @@ func (sess *Session) UnmarshalBinary(b []byte) error {
 	sess.RemoteUUID = o.RemoteUUID
 	sess.spkPub = o.SpkPub
 	sess.spkPriv = o.SpkPriv
-	if len(o.DoubleRachet) > 0 {
+	if len(o.DoubleRatchet) > 0 {
 		sess.doubleRatchet = &doubleratchet.DoubleRatchet{}
-		err = sess.doubleRatchet.UnmarshalBinary(o.DoubleRachet)
+		err = sess.doubleRatchet.UnmarshalBinary(o.DoubleRatchet)
 	}
 	return err
 }
