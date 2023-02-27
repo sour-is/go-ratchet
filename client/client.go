@@ -19,7 +19,7 @@ import (
 	"github.com/keys-pub/keys"
 	"github.com/oklog/ulid/v2"
 	"go.mills.io/salty"
-	"go.mills.io/saltyim"
+	"go.salty.im/saltyim"
 	"go.yarn.social/lextwt"
 	"golang.org/x/sync/errgroup"
 )

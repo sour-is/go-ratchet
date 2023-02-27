@@ -1,10 +1,9 @@
-module git.mills.io/saltyim/ratchet
+module go.salty.im/ratchet
 
 go 1.19
 
 require (
 	github.com/docopt/docopt-go v0.0.0-20180111231733-ee0de3bc6815
-	go.mills.io/saltyim v0.0.0-20230128070719-15a64de82829
 	golang.org/x/crypto v0.6.0
 	golang.org/x/sync v0.1.0
 )
@@ -12,7 +11,6 @@ require (
 require (
 	github.com/charmbracelet/bubbletea v0.23.2
 	github.com/charmbracelet/lipgloss v0.6.0
-	github.com/nxadm/tail v1.4.8 // indirect
 	go.uber.org/multierr v1.8.0
 )
 
@@ -23,11 +21,13 @@ require (
 
 require (
 	git.mills.io/prologic/msgbus v0.1.20
+	git.mills.io/saltyim/ratchet v0.0.0-20230227222358-f5dca0d452fb
 	github.com/charmbracelet/bubbles v0.15.0
 	github.com/keys-pub/keys v0.1.22
 	github.com/matryer/is v1.4.0
 	github.com/sour-is/ev v0.0.0-20230128173546-3f3ea4439c5a
 	go.mills.io/salty v0.0.0-20220322161301-ce2b9f6573fa
+	go.salty.im/saltyim v0.0.0-20230227224714-778133f763d9
 	go.yarn.social/lextwt v0.0.0-20230226040904-0097db79a25e
 )
 
@@ -104,6 +104,7 @@ require (
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/writeas/go-strip-markdown/v2 v2.1.1 // indirect
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
+	go.mills.io/saltyim v0.0.0-20230128070719-15a64de82829 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.34.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/runtime v0.34.0 // indirect
 	go.opentelemetry.io/otel v1.9.0 // indirect

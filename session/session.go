@@ -19,7 +19,7 @@ import (
 	"git.mills.io/saltyim/ratchet/xochimilco"
 	"github.com/keys-pub/keys"
 	"github.com/oklog/ulid/v2"
-	"go.mills.io/saltyim"
+	"go.salty.im/saltyim"
 )
 
 type Session struct {
