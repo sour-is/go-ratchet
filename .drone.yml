@@ -26,38 +26,6 @@ trigger:
 
 ---
 kind: pipeline
-name: 🐳 Docker
-
-steps:
-  - name: 📦 Image
-    image: plugins/kaniko
-    settings:
-      repo: prologic/saltyim
-      tags: latest
-      build_args:
-        - VERSION=latest
-        - COMMIT=${DRONE_COMMIT_SHA:0:8}
-      username:
-        from_secret: dockerhub_username
-      password:
-        from_secret: dockerhub_password
-    when:
-      branch:
-        - main
-      event:
-        - push
-
-depends_on:
-  - 🚀 CI
-
-trigger:
-  branch:
-    - main
-  event:
-    - push
-
----
-kind: pipeline
 name: 🥳 Done
 
 steps:
