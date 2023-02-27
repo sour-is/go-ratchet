@@ -1,6 +1,7 @@
 # Ratchet Chat
 
 [![Go Reference](https://pkg.go.dev/badge/git.mills.io/saltyim/ratchet.svg)](https://pkg.go.dev/git.mills.io/saltyim/ratchet)
+[![Build Status](https://ci.mills.io/api/badges/saltyim/ratchet/status.svg)](https://ci.mills.io/saltyim/ratchet)
 [![REUSE status](https://api.reuse.software/badge/git.mills.io/saltyim/ratchet)](https://api.reuse.software/info/git.mills.io/saltyim/ratchet)
 
 Ratchet is a chat client that utilizes X3DH Double Ratchet protocols over the salty msgbus to ensure E2E encryption
