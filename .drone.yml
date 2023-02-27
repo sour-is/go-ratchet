@@ -37,7 +37,6 @@ steps:
 
 depends_on:
   - 🚀 CI
-  - 🐳 Docker
 
 trigger:
   branch:
