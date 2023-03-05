@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2023 Jon Lundy <jon@xuu.cc>
 // SPDX-License-Identifier: BSD-3-Clause
 
-package main
+package ui
 
 import (
 	"context"
@@ -55,7 +55,7 @@ type model struct {
 	err       error
 }
 
-func initialModel(c *client.Client, them string) model {
+func InitialModel(c *client.Client, them string) model {
 
 	ti := textinput.New()
 	ti.Placeholder = "Message"
@@ -71,6 +71,17 @@ func initialModel(c *client.Client, them string) model {
 		textInput: ti,
 	}
 	m.setPrompt()
+
+	client.On(c, func(ctx context.Context, args client.OnOfferSent) { m.Update(args) })
+	client.On(c, func(ctx context.Context, args client.OnOfferReceived) { m.Update(args) })
+	client.On(c, func(ctx context.Context, args client.OnSessionStarted) { m.Update(args) })
+	client.On(c, func(ctx context.Context, args client.OnSessionClosed) { m.Update(args) })
+	client.On(c, func(ctx context.Context, args client.OnMessageReceived) { m.Update(args) })
+	client.On(c, func(ctx context.Context, args client.OnMessageSent) { m.Update(args) })
+	client.On(c, func(ctx context.Context, args client.OnSaltySent) { m.Update(args) })
+	client.On(c, func(ctx context.Context, args client.OnSaltyTextReceived) { m.Update(args) })
+	client.On(c, func(ctx context.Context, args client.OnSaltyEventReceived) { m.Update(args) })
+	client.On(c, func(ctx context.Context, args client.OnOtherReceived) { m.Update(args) })
 
 	return m
 }
@@ -148,9 +159,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// handle show list of open sessions
 				if len(sp) <= 1 {
 					err := m.c.Use(ctx, func(ctx context.Context, sm client.SessionManager) error {
-						log("usage: /chat|close username")
+						fmt.Fprintln(m.content, "usage: /chat|close username")
 						for _, p := range sm.Sessions() {
-							log("sess: ", p.Name)
+							fmt.Fprintln(m.content, "sess: ", p.Name)
 						}
 						return nil
 					})

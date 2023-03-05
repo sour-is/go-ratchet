@@ -1,4 +1,5 @@
 *.msg
 tmp/
-/ratchet
+/ratchet*
 /coverage.out
+/cover

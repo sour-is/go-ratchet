@@ -9,6 +9,10 @@ import (
 )
 
 func (dhr *dhRatchet) MarshalBinary() ([]byte, error) {
+	if dhr == nil {
+		return nil, nil
+	}
+
 	var buf bytes.Buffer
 	o := struct {
 		RootKey   []byte
@@ -33,6 +37,10 @@ func (dhr *dhRatchet) MarshalBinary() ([]byte, error) {
 }
 
 func (dhr *dhRatchet) UnmarshalBinary(b []byte) error {
+	if len(b) == 0 {
+		return nil
+	}
+
 	var o struct {
 		RootKey   []byte
 		DhPub     []byte
@@ -51,6 +59,70 @@ func (dhr *dhRatchet) UnmarshalBinary(b []byte) error {
 	dhr.peerDhPub = o.PeerDhPub
 	dhr.isActive = o.IsActive
 	dhr.isInitialized = o.IsInitialized
+
+	return err
+}
+
+func (kb *keyBuffer) MarshalBinary() ([]byte, error) {
+	if kb == nil {
+		return nil, nil
+	}
+
+	var buf bytes.Buffer
+	lis := make([]*keyBufferElement, kb.buff.Len())
+	i := 0
+	kb.buff.Do(func(a interface{}) {
+		if kbe, ok := a.(*keyBufferElement); ok {
+			lis[i] = kbe
+			i++
+		}
+	})
+	lis = lis[:i]
+	err := gob.NewEncoder(&buf).Encode(lis)
+
+	return buf.Bytes(), err
+}
+
+func (kb *keyBuffer) UnmarshalBinary(b []byte) error {
+	if len(b) == 0 {
+		return nil
+	}
+
+	lis := make([]*keyBufferElement, maxSkipChains)
+	err := gob.NewDecoder(bytes.NewReader(b)).Decode(&lis)
+	if err != nil {
+		return err
+	}
+
+	for _, kbe := range lis {
+		kb.buff.Value = kbe
+		kb.buff.Prev()
+	}
+
+	return nil
+}
+
+func (kb *keyBufferElement) MarshalBinary() ([]byte, error) {
+	var buf bytes.Buffer
+	o := struct {
+		DhPub   []byte
+		MsgKeys map[int][]byte
+	}{
+		kb.dhPub,
+		kb.msgKeys,
+	}
+	err := gob.NewEncoder(&buf).Encode(o)
+	return buf.Bytes(), err
+}
+func (kb *keyBufferElement) UnmarshalBinary(b []byte) error {
+	var o struct {
+		DhPub   []byte
+		MsgKeys map[int][]byte
+	}
+	err := gob.NewDecoder(bytes.NewReader(b)).Decode(&o)
+
+	kb.dhPub = o.DhPub
+	kb.msgKeys = o.MsgKeys
 
 	return err
 }
@@ -98,6 +170,9 @@ func (dr *DoubleRatchet) MarshalBinary() ([]byte, error) {
 	return buf.Bytes(), err
 }
 func (dr *DoubleRatchet) UnmarshalBinary(b []byte) error {
+	if len(b) == 0 {
+		return nil
+	}
 	var o struct {
 		AssociatedData []byte
 

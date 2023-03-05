@@ -23,6 +23,7 @@ import (
 	"go.salty.im/ratchet/client"
 	"go.salty.im/ratchet/interactive"
 	"go.salty.im/ratchet/session"
+	"go.salty.im/ratchet/ui"
 	"go.salty.im/ratchet/xdg"
 )
 
@@ -149,19 +150,8 @@ func run(ctx context.Context, opts opts) error {
 
 		wg.Go(func() error { return c.Run(ctx) })
 
-		m := initialModel(c, opts.Them)
+		m := ui.InitialModel(c, opts.Them)
 		p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseAllMotion())
-
-		client.On(c, func(ctx context.Context, args client.OnOfferSent) { m.Update(args) })
-		client.On(c, func(ctx context.Context, args client.OnOfferReceived) { m.Update(args) })
-		client.On(c, func(ctx context.Context, args client.OnSessionStarted) { m.Update(args) })
-		client.On(c, func(ctx context.Context, args client.OnSessionClosed) { m.Update(args) })
-		client.On(c, func(ctx context.Context, args client.OnMessageReceived) { m.Update(args) })
-		client.On(c, func(ctx context.Context, args client.OnMessageSent) { m.Update(args) })
-		client.On(c, func(ctx context.Context, args client.OnSaltySent) { m.Update(args) })
-		client.On(c, func(ctx context.Context, args client.OnSaltyTextReceived) { m.Update(args) })
-		client.On(c, func(ctx context.Context, args client.OnSaltyEventReceived) { m.Update(args) })
-		client.On(c, func(ctx context.Context, args client.OnOtherReceived) { m.Update(args) })
 
 		wg.Go(func() error {
 			defer cancel()

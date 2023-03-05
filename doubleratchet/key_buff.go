@@ -11,10 +11,8 @@
 package doubleratchet
 
 import (
-	"bytes"
 	"container/ring"
 	"crypto/subtle"
-	"encoding/gob"
 	"fmt"
 )
 
@@ -31,66 +29,10 @@ type keyBuffer struct {
 	buff *ring.Ring
 }
 
-func (kb *keyBuffer) MarshalBinary() ([]byte, error) {
-	var buf bytes.Buffer
-	lis := make([]*keyBufferElement, kb.buff.Len())
-	i := 0
-	kb.buff.Do(func(a interface{}) {
-		if kbe, ok := a.(*keyBufferElement); ok {
-			lis[i] = kbe
-			i++
-		}
-	})
-	lis = lis[:i]
-	err := gob.NewEncoder(&buf).Encode(lis)
-
-	return buf.Bytes(), err
-}
-
-func (kb *keyBuffer) UnmarshalBinary(b []byte) error {
-	lis := make([]*keyBufferElement, maxSkipChains)
-	err := gob.NewDecoder(bytes.NewReader(b)).Decode(&lis)
-	if err != nil {
-		return err
-	}
-
-	for _, kbe := range lis {
-		kb.buff.Value = kbe
-		kb.buff.Prev()
-	}
-
-	return nil
-}
-
 // keyBufferElement is the type of a keyBuffer's ring buffer element.
 type keyBufferElement struct {
 	dhPub   []byte
 	msgKeys map[int][]byte
-}
-
-func (kb *keyBufferElement) MarshalBinary() ([]byte, error) {
-	var buf bytes.Buffer
-	o := struct {
-		DhPub   []byte
-		MsgKeys map[int][]byte
-	}{
-		kb.dhPub,
-		kb.msgKeys,
-	}
-	err := gob.NewEncoder(&buf).Encode(o)
-	return buf.Bytes(), err
-}
-func (kb *keyBufferElement) UnmarshalBinary(b []byte) error {
-	var o struct {
-		DhPub   []byte
-		MsgKeys map[int][]byte
-	}
-	err := gob.NewDecoder(bytes.NewReader(b)).Decode(&o)
-
-	kb.dhPub = o.DhPub
-	kb.msgKeys = o.MsgKeys
-
-	return err
 }
 
 // newKeyBuffer to be used within the DoubleRatchet.

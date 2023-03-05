@@ -1,6 +1,8 @@
 # SPDX-FileCopyrightText: 2023 Jon Lundy <jon@xuu.cc>
 # SPDX-License-Identifier: CC0-1.0
 
+GORUN?=go run .
+
 ALICE=alice@sour.is
 ALICE_KEY=alice.key
 
@@ -11,11 +13,15 @@ build:
 	@go build .
 test: ## Run test suite
 	@go test -failfast -shuffle on -race -cover -coverprofile=coverage.out ./...
-
+run-cover:
+	rm cover/cov*
+	go build -cover -o ./ratchet-cover .
+	GOCOVERDIR=cover GORUN=./ratchet-cover make simulate
+	go test -cover ./... -test.gocoverdir=$(PWD)/cover/
+	go tool covdata percent -i=cover/
 
 ui:
 	go build . && ./ratchet ui --key $(ALICE_KEY) --state ./tmp
-
 
 
 simulate:
@@ -23,39 +29,39 @@ simulate:
 	@chmod 400 *.key
 	@echo Alice starts by offering Bob to upgrade the connection.
 	@echo
-	go run . --key $(ALICE_KEY) --state ./tmp offer $(BOB) | tee offer.msg
+	$(GORUN) --key $(ALICE_KEY) --state ./tmp offer $(BOB) | tee offer.msg
 
 	@echo
 	@echo "Bob acknowledges Alice's offer."
 	@echo
-	go run . --key $(BOB_KEY) --state ./tmp --msg-file offer.msg recv | tee ack.msg
+	$(GORUN) --key $(BOB_KEY) --state ./tmp --msg-file offer.msg recv | tee ack.msg
 
 	@echo
 	@echo "Alice evaluates Bob's acknowledgement."
 	@echo
-	go run . --key $(ALICE_KEY) --state ./tmp recv --msg-file ack.msg
+	$(GORUN) --key $(ALICE_KEY) --state ./tmp recv --msg-file ack.msg
 
 	@echo
 	@echo Alice sends message
 	@echo
-	go run . --key $(ALICE_KEY) --state ./tmp send $(BOB) --msg hello | tee send1.msg
+	$(GORUN) --key $(ALICE_KEY) --state ./tmp send $(BOB) --msg hello | tee send1.msg
 
 	@echo
 	@echo Bob receives message. sends reply
 	@echo
-	go run . --key $(BOB_KEY) --state ./tmp recv --msg-file send1.msg
-	go run . --key $(BOB_KEY)  --state ./tmp send $(ALICE) --msg yoyo | tee send2.msg
+	$(GORUN) --key $(BOB_KEY) --state ./tmp recv --msg-file send1.msg
+	$(GORUN) --key $(BOB_KEY)  --state ./tmp send $(ALICE) --msg yoyo | tee send2.msg
 
 	@echo
 	@echo Alice receives message. sends close
 	@echo
-	go run . --key $(ALICE_KEY)  --state ./tmp recv --msg-file send2.msg
-	go run . --key $(ALICE_KEY)  --state ./tmp close $(BOB) | tee close.msg
+	$(GORUN) --key $(ALICE_KEY)  --state ./tmp recv --msg-file send2.msg
+	$(GORUN) --key $(ALICE_KEY)  --state ./tmp close $(BOB) | tee close.msg
 
 	@echo
 	@echo Bob receives close.
 	@echo
-	go run . --key $(BOB_KEY) --state ./tmp recv --msg-file close.msg
+	$(GORUN) --key $(BOB_KEY) --state ./tmp recv --msg-file close.msg
 
 
 chat-bob:
@@ -64,12 +70,12 @@ chat-alice:
 	go build .; ./ratchet --key alice.key --state ./tmp --post chat
 
 offer-bob:
-	go run . offer bob@sour.is --key alice.key --state ./tmp --post
+	$(GORUN) offer bob@sour.is --key alice.key --state ./tmp --post
 close-alice:
-	go run . close alice@sour.is --key bob.key  --state ./tmp --post
+	$(GORUN) close alice@sour.is --key bob.key  --state ./tmp --post
 
 send-bob:
-	go run . send bob@sour.is --key alice.key  --state ./tmp --post --msg $(MSG)
+	$(GORUN) send bob@sour.is --key alice.key  --state ./tmp --post --msg $(MSG)
 send-alice:
-	go run . send alice@sour.is --key bob.key  --state ./tmp --post --msg $(MSG)
+	$(GORUN) send alice@sour.is --key bob.key  --state ./tmp --post --msg $(MSG)
 
