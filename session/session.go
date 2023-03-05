@@ -15,6 +15,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"unicode/utf8"
 
 	"github.com/keys-pub/keys"
 	"github.com/oklog/ulid/v2"
@@ -151,7 +152,6 @@ func (sm *DiskSessionManager) Get(id ulid.ULID) (*Session, error) {
 	sh := sessionhash(sm.me, id)
 	filename := filepath.Join(sm.path, sh)
 
-	// log("READ: ", filename)
 	fd, err := os.Stat(filename)
 	if err != nil {
 		return nil, fmt.Errorf("stat: %w", err)
@@ -168,8 +168,8 @@ func (sm *DiskSessionManager) Get(id ulid.ULID) (*Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %d bytes: %w", len(b), err)
 	}
-	if b[0] == '\u0096' {
-		b, err = keys.SecretBoxOpen(b[1:], sm.key.X25519Key().Bytes32())
+	if r, size := utf8.DecodeRune(b); size == 2 && r == '\u0096' {
+		b, err = keys.SecretBoxOpen(b[utf8.RuneLen('\u0096'):], sm.key.X25519Key().Bytes32())
 		if err != nil {
 			return nil, fmt.Errorf("decrypt %d bytes: %w", len(b), err)
 		}
@@ -207,7 +207,7 @@ func (sm *DiskSessionManager) Put(sess *Session) error {
 	if err != nil {
 		return err
 	}
-	b = keys.BoxSeal(b, sm.key.X25519Key().PublicKey(), sm.key.X25519Key())
+	b = keys.SecretBoxSeal(b, sm.key.X25519Key().Bytes32())
 	fp.WriteString("\u0096")
 
 	_, err = fp.Write(b)
@@ -221,7 +221,6 @@ func (sm *DiskSessionManager) Delete(sess *Session) error {
 	copy(u[:], sess.LocalUUID)
 	sh := sessionhash(sm.me, u)
 	filename := filepath.Join(sm.path, sh)
-	// log("REMOVE:", filename)
 	delete(sm.sessions, sess.Name)
 	return os.Remove(filename)
 }
@@ -266,7 +265,6 @@ func (sm *DiskSessionManager) Close() error {
 		return err
 	}
 	defer fp.Close()
-	// defer log("Saved Session Data ", name)
 
 	type item struct {
 		Name    string
@@ -310,10 +308,6 @@ func sessionhash(self string, id ulid.ULID) string {
 	return enc(h.Sum(nil))
 }
 
-// func log(a ...any) {
-// 	fmt.Fprintf(os.Stderr, "\033[90m%s\033[0m\n", fmt.Sprint(a...))
-// }
-
 func enc(b []byte) string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
@@ -330,7 +324,6 @@ func fetchKey(to string) (saltyim.Addr, error) {
 	if err != nil {
 		return nil, err
 	}
-	// log(addr.Endpoint())
 
 	return addr, nil
 }

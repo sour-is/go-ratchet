@@ -21,15 +21,16 @@ require (
 
 require (
 	git.mills.io/prologic/msgbus v0.1.20
-	git.mills.io/saltyim/ratchet v0.0.0-20230227222358-f5dca0d452fb
 	github.com/charmbracelet/bubbles v0.15.0
 	github.com/keys-pub/keys v0.1.22
 	github.com/matryer/is v1.4.0
 	github.com/sour-is/ev v0.0.0-20230128173546-3f3ea4439c5a
 	go.mills.io/salty v0.0.0-20220322161301-ce2b9f6573fa
-	go.salty.im/saltyim v0.0.0-20230227224714-778133f763d9
+	go.salty.im/saltyim v0.0.0-20230305163315-e4a8fc193309
 	go.yarn.social/lextwt v0.0.0-20230226040904-0097db79a25e
 )
+
+require github.com/miekg/dns v1.1.25 // indirect
 
 require (
 	github.com/ScaleFT/sshkeys v1.2.0 // indirect
@@ -47,6 +48,7 @@ require (
 	github.com/dchest/bcrypt_pbkdf v0.0.0-20150205184540-83f37f9c154a // indirect
 	github.com/dchest/blake2b v1.0.0 // indirect
 	github.com/felixge/httpsnoop v1.0.3 // indirect
+	github.com/foxcpp/go-mockdns v1.0.0
 	github.com/go-logr/logr v1.2.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
@@ -72,10 +74,12 @@ require (
 	github.com/mattn/go-localereader v0.0.1 // indirect
 	github.com/mattn/go-runewidth v0.0.14 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
+	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/muesli/ansi v0.0.0-20211018074035-2e021307bc4b // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/reflow v0.3.0 // indirect
 	github.com/muesli/termenv v0.14.0 // indirect
+	github.com/nxadm/tail v1.4.8 // indirect
 	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
 	github.com/petermattis/goid v0.0.0-20221215004737-a150e88a970d // indirect
 	github.com/pkg/errors v0.9.1 // indirect
@@ -104,7 +108,6 @@ require (
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/writeas/go-strip-markdown/v2 v2.1.1 // indirect
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
-	go.mills.io/saltyim v0.0.0-20230128070719-15a64de82829 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.34.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/runtime v0.34.0 // indirect
 	go.opentelemetry.io/otel v1.9.0 // indirect
@@ -124,7 +127,7 @@ require (
 	golang.org/x/term v0.5.0 // indirect
 	golang.org/x/text v0.7.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
-	google.golang.org/genproto v0.0.0-20211118181313-81c1377c94b1 // indirect
+	google.golang.org/genproto v0.0.0-20211208223120-3a66f561d7aa // indirect
 	google.golang.org/grpc v1.46.2 // indirect
 	google.golang.org/protobuf v1.28.1 // indirect
 	nhooyr.io/websocket v1.8.7 // indirect
