@@ -13,8 +13,8 @@ import (
 	"fmt"
 
 	"github.com/oklog/ulid"
-	"git.mills.io/saltyim/ratchet/doubleratchet"
-	"git.mills.io/saltyim/ratchet/x3dh"
+	"go.salty.im/ratchet/doubleratchet"
+	"go.salty.im/ratchet/x3dh"
 )
 
 // Session between two parties to exchange encrypted messages.
@@ -72,11 +72,11 @@ func (sess *Session) MarshalBinary() ([]byte, error) {
 		}
 	}
 	o := struct {
-		LocalUUID    []byte
-		RemoteUUID   []byte
-		Me           string
-		SpkPub       []byte
-		SpkPriv      []byte
+		LocalUUID     []byte
+		RemoteUUID    []byte
+		Me            string
+		SpkPub        []byte
+		SpkPriv       []byte
 		DoubleRatchet []byte
 	}{
 		sess.LocalUUID,
@@ -92,11 +92,11 @@ func (sess *Session) MarshalBinary() ([]byte, error) {
 }
 func (sess *Session) UnmarshalBinary(b []byte) error {
 	var o struct {
-		LocalUUID    []byte
-		RemoteUUID   []byte
-		Me           string
-		SpkPub       []byte
-		SpkPriv      []byte
+		LocalUUID     []byte
+		RemoteUUID    []byte
+		Me            string
+		SpkPub        []byte
+		SpkPriv       []byte
 		DoubleRatchet []byte
 	}
 	err := gob.NewDecoder(bytes.NewReader(b)).Decode(&o)

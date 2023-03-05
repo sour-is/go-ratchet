@@ -13,12 +13,12 @@ import (
 
 	"git.mills.io/prologic/msgbus"
 	"git.mills.io/prologic/msgbus/client"
-	"git.mills.io/saltyim/ratchet/locker"
-	"git.mills.io/saltyim/ratchet/session"
-	"git.mills.io/saltyim/ratchet/xochimilco"
 	"github.com/keys-pub/keys"
 	"github.com/oklog/ulid/v2"
 	"go.mills.io/salty"
+	"go.salty.im/ratchet/locker"
+	"go.salty.im/ratchet/session"
+	"go.salty.im/ratchet/xochimilco"
 	"go.salty.im/saltyim"
 	"go.yarn.social/lextwt"
 	"golang.org/x/sync/errgroup"
@@ -305,10 +305,10 @@ func (c *Client) SendSalty(ctx context.Context, them, text string, events ...*Ev
 		}
 
 		return dispatch(ctx, c, OnSaltySent{
-			Them: them, 
-			Addr: addr, 
-			Raw: msg.Literal(), 
-			Msg: msg,
+			Them: them,
+			Addr: addr,
+			Raw:  msg.Literal(),
+			Msg:  msg,
 		})
 	})
 }
@@ -440,18 +440,18 @@ func (c *Client) msgbusHandler(in *msgbus.Message) error {
 		switch msg := msg.(type) {
 		case *Msg:
 			return dispatch(ctx, c, OnMessageReceived{
-				ID: toULID(xmsg.ID()), 
-				Them: sess.Name, 
-				Raw: string(plaintext),
-				Msg: msg,
+				ID:   toULID(xmsg.ID()),
+				Them: sess.Name,
+				Raw:  string(plaintext),
+				Msg:  msg,
 			})
-	
+
 		case *Event:
 			return dispatch(ctx, c, OnEventReceived{
-				ID: toULID(xmsg.ID()), 
-				Them: sess.Name, 
-				Raw: string(plaintext),
-				Msg: msg,
+				ID:   toULID(xmsg.ID()),
+				Them: sess.Name,
+				Raw:  string(plaintext),
+				Msg:  msg,
 			})
 
 		}

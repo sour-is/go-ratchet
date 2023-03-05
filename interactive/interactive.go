@@ -13,8 +13,8 @@ import (
 	"syscall"
 	"time"
 
-	"git.mills.io/saltyim/ratchet/client"
 	"github.com/oklog/ulid/v2"
+	"go.salty.im/ratchet/client"
 )
 
 type service struct {

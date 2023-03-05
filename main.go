@@ -20,10 +20,10 @@ import (
 	"go.uber.org/multierr"
 	"golang.org/x/sync/errgroup"
 
-	"git.mills.io/saltyim/ratchet/client"
-	"git.mills.io/saltyim/ratchet/interactive"
-	"git.mills.io/saltyim/ratchet/session"
-	"git.mills.io/saltyim/ratchet/xdg"
+	"go.salty.im/ratchet/client"
+	"go.salty.im/ratchet/interactive"
+	"go.salty.im/ratchet/session"
+	"go.salty.im/ratchet/xdg"
 )
 
 var usage = `Ratchet Chat.
@@ -39,7 +39,7 @@ Args:
 Options:
   --key <key>        Sender private key [default: ` + xdg.Get(xdg.EnvConfigHome, "racthet/$USER.key") + `]
   --state <state>    Session state path [default: ` + xdg.Get(xdg.EnvStateHome, "racthet") + `]
-  --log <logs>       Log storage path   [default: `+ xdg.Get(xdg.EnvDataHome, "ratchet") + `]
+  --log <logs>       Log storage path   [default: ` + xdg.Get(xdg.EnvDataHome, "ratchet") + `]
   --msg <msg>        Msg to read in.    [default to read Standard Input]
   --msg-file <file>  File to read input from.
   --msg-stdin        Read standard input.
@@ -188,7 +188,7 @@ func toULID(b []byte) ulid.ULID {
 	return id
 }
 
-func setupChatlog(ctx context.Context, path string) (*ev.EventStore, error){
+func setupChatlog(ctx context.Context, path string) (*ev.EventStore, error) {
 	// setup eventstore
 	err := multierr.Combine(
 		ev.Init(ctx),

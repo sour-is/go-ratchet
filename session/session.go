@@ -16,9 +16,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"git.mills.io/saltyim/ratchet/xochimilco"
 	"github.com/keys-pub/keys"
 	"github.com/oklog/ulid/v2"
+	"go.salty.im/ratchet/xochimilco"
 	"go.salty.im/saltyim"
 )
 
@@ -168,9 +168,18 @@ func (sm *DiskSessionManager) Get(id ulid.ULID) (*Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %d bytes: %w", len(b), err)
 	}
+	if b[0] == '\u0096' {
+		b, err = keys.SecretBoxOpen(b[1:], sm.key.X25519Key().Bytes32())
+		if err != nil {
+			return nil, fmt.Errorf("decrypt %d bytes: %w", len(b), err)
+		}
+	}
 
 	sess := &Session{}
 	err = sess.UnmarshalBinary(b)
+	if err != nil {
+		return nil, err
+	}
 
 	// session only needs private key during initial handshake.
 	if !sess.Active() {
@@ -198,6 +207,8 @@ func (sm *DiskSessionManager) Put(sess *Session) error {
 	if err != nil {
 		return err
 	}
+	b = keys.BoxSeal(b, sm.key.X25519Key().PublicKey(), sm.key.X25519Key())
+	fp.WriteString("\u0096")
 
 	_, err = fp.Write(b)
 	if err != nil {

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"git.mills.io/saltyim/ratchet/xochimilco"
 	"github.com/matryer/is"
+	"go.salty.im/ratchet/xochimilco"
 )
 
 func TestSession(t *testing.T) {

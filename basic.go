@@ -12,10 +12,10 @@ import (
 	"os"
 	"strings"
 
-	"git.mills.io/saltyim/ratchet/session"
-	"git.mills.io/saltyim/ratchet/xochimilco"
 	"github.com/keys-pub/keys"
 	"github.com/oklog/ulid/v2"
+	"go.salty.im/ratchet/session"
+	"go.salty.im/ratchet/xochimilco"
 	"go.salty.im/saltyim"
 )
 

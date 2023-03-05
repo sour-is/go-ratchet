@@ -7,8 +7,8 @@ import (
 	"context"
 	"testing"
 
-	"git.mills.io/saltyim/ratchet/locker"
 	"github.com/matryer/is"
+	"go.salty.im/ratchet/locker"
 )
 
 type config struct {
@@ -32,9 +32,9 @@ func TestLocker(t *testing.T) {
 	is.NoErr(err)
 
 	var cp *config
-	 err = value.Use(context.Background(), func(ctx context.Context, c *config) error {
+	err = value.Use(context.Background(), func(ctx context.Context, c *config) error {
 		cp = &config{
-			Value: c.Value,
+			Value:   c.Value,
 			Counter: c.Counter,
 		}
 		return nil
@@ -65,7 +65,7 @@ func TestLocker(t *testing.T) {
 
 	err = value.Use(context.Background(), func(ctx context.Context, c *config) error {
 		cp = &config{
-			Value: c.Value,
+			Value:   c.Value,
 			Counter: c.Counter,
 		}
 		return nil

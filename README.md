@@ -170,7 +170,7 @@ Some background, the [lake Xochimilco][wiki-xochimilco] seems to be the last nat
 This salamander, also called _Mexican walking fish_, has incredibly self healing abilities.
 For this reason, the Double Ratchet algorithm was initially named after this animal.
 
-[go-doc]: https://pkg.go.dev/git.mills.io/saltyim/ratchet
+[go-doc]: https://pkg.go.dev/go.salty.im/ratchet
 [signal-docs]: https://signal.org/docs/
 [signal-x3dh]: https://signal.org/docs/specifications/x3dh/
 [signal-double-ratchet]: https://signal.org/docs/specifications/doubleratchet/
