@@ -14,9 +14,10 @@ import (
 
 	"github.com/keys-pub/keys"
 	"github.com/oklog/ulid/v2"
+	"go.salty.im/saltyim"
+
 	"go.salty.im/ratchet/session"
 	"go.salty.im/ratchet/xochimilco"
-	"go.salty.im/saltyim"
 )
 
 func doOffer(ctx context.Context, opts opts) error {

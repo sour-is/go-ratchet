@@ -69,7 +69,7 @@ func (svc *service) Interactive(ctx context.Context, me, them string) {
 		fmt.Printf("\n\033[1A\r\033[2K\033[90m::: salty: %s(%s)\033[0m\n", args.Event.Command, strings.Join(args.Event.Args, ", "))
 		fmt.Printf(svc.prompt)
 	})
-	client.On(svc.Client, func(ctx context.Context, args client.OnOtherReceived) {
+	client.On(svc.Client, func(ctx context.Context, args client.OnReceived) {
 		fmt.Printf("\n\033[1A\r\033[2K\033[90m::: unknown message: %s\033[0m\n", args.Raw)
 		fmt.Printf(svc.prompt)
 	})

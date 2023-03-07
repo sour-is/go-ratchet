@@ -81,7 +81,7 @@ func InitialModel(c *client.Client, them string) model {
 	client.On(c, func(ctx context.Context, args client.OnSaltySent) { m.Update(args) })
 	client.On(c, func(ctx context.Context, args client.OnSaltyTextReceived) { m.Update(args) })
 	client.On(c, func(ctx context.Context, args client.OnSaltyEventReceived) { m.Update(args) })
-	client.On(c, func(ctx context.Context, args client.OnOtherReceived) { m.Update(args) })
+	client.On(c, func(ctx context.Context, args client.OnReceived) { m.Update(args) })
 
 	return m
 }
@@ -136,7 +136,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case client.OnSessionClosed:
 		fmt.Fprintf(m.content, "\033[90m%s ::: session closed %s :::\033[0m\n", getTime(msg.ID).Format("15:04:05"), msg.Them)
 
-	case client.OnOtherReceived:
+	case client.OnReceived:
 		fmt.Fprintf(m.content, "\033[90m%s ::: unknown message: %s\033[0m\n", time.Now().Format("15:04:05"), msg.Raw)
 
 	case tea.KeyMsg:

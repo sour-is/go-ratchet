@@ -20,7 +20,7 @@ run-cover:
 	go test -cover ./... -test.gocoverdir=$(PWD)/cover/
 	go tool covdata percent -i=cover/
 
-ui:
+run-ui:
 	go build . && ./ratchet ui --key $(ALICE_KEY) --state ./tmp
 
 

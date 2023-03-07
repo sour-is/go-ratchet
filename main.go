@@ -21,6 +21,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"go.salty.im/ratchet/client"
+	"go.salty.im/ratchet/client/driver-msgbus"
 	"go.salty.im/ratchet/interactive"
 	"go.salty.im/ratchet/session"
 	"go.salty.im/ratchet/ui"
@@ -117,7 +118,7 @@ func run(ctx context.Context, opts opts) error {
 		}
 		defer close()
 
-		c, err := client.NewClient(sm, me)
+		c, err := client.New(sm, me, driver_msgbus.WithMsgbus(sm.Position()))
 		if err != nil {
 			return err
 		}
@@ -140,7 +141,7 @@ func run(ctx context.Context, opts opts) error {
 		}
 		defer close()
 
-		c, err := client.NewClient(sm, me)
+		c, err := client.New(sm, me, driver_msgbus.WithMsgbus(sm.Position()))
 		if err != nil {
 			return err
 		}

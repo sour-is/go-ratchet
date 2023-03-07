@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"git.mills.io/prologic/msgbus"
 	"git.mills.io/prologic/msgbus/client"
 	"github.com/keys-pub/keys"
 	"github.com/oklog/ulid/v2"
@@ -47,38 +46,52 @@ type Client struct {
 
 	sm   *locker.Locked[SessionManager]
 	addr Addr
-	bus  *client.Client
-	sub  *client.Subscriber
+
+	driver Driver
+	sub    *client.Subscriber
 
 	on map[any][]any
 }
+type Option interface {
+	ApplyClient(*Client)
+}
 
-func NewClient(sm SessionManager, me string) (*Client, error) {
+type Driver interface{ Run(context.Context) error }
+
+type withDriver struct {
+	Driver
+}
+
+func WithDriver(d Driver) withDriver {
+	return withDriver{d}
+}
+
+func (d withDriver) ApplyClient(c *Client) {
+	c.driver = d
+}
+
+func New(sm SessionManager, me string, opts ...Option) (*Client, error) {
 	addr, err := saltyim.LookupAddr(me)
 	if err != nil {
 		return nil, fmt.Errorf("lookup addr: %w", err)
 	}
 
-	var pos int64 = -1
-	if p, ok := sm.(interface{ Position() int64 }); ok {
-		pos = p.Position()
-	}
-
-	uri, inbox := saltyim.SplitInbox(addr.Endpoint().String())
-
 	cl := &Client{
-		sm:   locker.New(sm),
-		addr: addr,
-		bus:  client.NewClient(uri, nil),
-		on:   make(map[any][]any),
+		sm:     locker.New(sm),
+		addr:   addr,
+		driver: nilDriver{},
+		on:     make(map[any][]any),
 	}
-	cl.sub = cl.bus.Subscribe(inbox, pos, cl.msgbusHandler)
+
+	for _, o := range opts {
+		o.ApplyClient(cl)
+	}
 
 	return cl, nil
 }
 
 func (c *Client) Run(ctx context.Context) error {
-	return c.sub.Run(ctx)
+	return c.driver.Run(ctx)
 }
 func (c *Client) Me() saltyim.Addr {
 	return c.addr
@@ -103,7 +116,6 @@ func dispatch[T any](ctx context.Context, c *Client, args T) error {
 		})
 	}
 	return wg.Wait()
-
 }
 
 type OnOfferSent struct {
@@ -155,7 +167,7 @@ type OnSaltySent struct {
 	Msg  *Msg
 	Raw  string
 }
-type OnOtherReceived struct {
+type OnReceived struct {
 	Raw string
 }
 
@@ -321,17 +333,15 @@ func (c *Client) Context() (context.Context, context.CancelFunc) {
 	return context.WithCancel(ctx)
 }
 
-func (c *Client) msgbusHandler(in *msgbus.Message) error {
+func (c *Client) Handler(pos int64, input string) error {
 	ctx, cancel := c.Context()
 	defer cancel()
-
-	input := string(in.Payload)
 
 	if strings.HasPrefix(input, "BEGIN SALTPACK ENCRYPTED MESSAGE.") {
 		return c.sm.Use(ctx, func(ctx context.Context, sm SessionManager) error {
 			// Update session manager position in stream if supported.
-			if pos, ok := sm.(interface{ SetPosition(int64) }); ok {
-				pos.SetPosition(in.ID + 1)
+			if s, ok := sm.(interface{ SetPosition(int64) }); ok {
+				s.SetPosition(pos + 1)
 			}
 
 			text, key, err := salty.Decrypt(sm.Identity(), []byte(input))
@@ -358,7 +368,7 @@ func (c *Client) msgbusHandler(in *msgbus.Message) error {
 	}
 
 	if !(strings.HasPrefix(input, "!RAT!") && strings.HasSuffix(input, "!CHT!")) {
-		return dispatch(ctx, c, OnOtherReceived{input})
+		return dispatch(ctx, c, OnReceived{input})
 	}
 
 	id, xmsg, err := readMsg(input)
@@ -368,8 +378,8 @@ func (c *Client) msgbusHandler(in *msgbus.Message) error {
 
 	return c.sm.Use(ctx, func(ctx context.Context, sm SessionManager) error {
 		// Update session manager position in stream if supported.
-		if pos, ok := sm.(interface{ SetPosition(int64) }); ok {
-			pos.SetPosition(in.ID + 1)
+		if s, ok := sm.(interface{ SetPosition(int64) }); ok {
+			s.SetPosition(pos + 1)
 		}
 
 		// unseal message if required.
@@ -489,4 +499,11 @@ func toElems(e lextwt.Elem, events []*Event) []lextwt.Elem {
 		lis = append(lis, events[i])
 	}
 	return lis
+}
+
+type nilDriver struct{}
+
+func (nilDriver) Run(ctx context.Context) error {
+	<-ctx.Done()
+	return ctx.Err()
 }
