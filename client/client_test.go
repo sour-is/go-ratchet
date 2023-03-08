@@ -1,6 +1,7 @@
 package client_test
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -19,13 +20,24 @@ import (
 func TestMain(m *testing.M) {
 	// Setup
 	http.DefaultClient.Transport = httpMock(func(r *http.Request) (*http.Response, error) {
-		fmt.Fprint(os.Stderr, r.URL)
+		fmt.Fprintln(os.Stderr, r.URL)
 
-		return &http.Response{
-			Status:     http.StatusText(http.StatusOK),
-			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader(`{"endpoint":"https://ev.sour.is/inbox/01GPYAXX53N6GCKJV2BPJGTQPB","key":"kex1ac2s0vwskgctgjucqldtd5k4v5xjxv80smf0n9dqqags43keu7usqfh9ud"}`)),
-		}, nil
+		switch r.URL.String() {
+		case "https://ev.sour.is/.well-known/salty/01bc6186d015218c23dec55447e502e669ca4c61c7566dfcaa1cac256108dff0.json":
+			return &http.Response{
+				Status:     http.StatusText(http.StatusOK),
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"endpoint":"https://ev.sour.is/inbox/01GPYAXX53N6GCKJV2BPJGTQPB","key":"kex1ac2s0vwskgctgjucqldtd5k4v5xjxv80smf0n9dqqags43keu7usqfh9ud"}`)),
+			}, nil
+
+		case "https://ev.sour.is/.well-known/salty/dd431ebefb0660bc09632817618e65322ee2540aa8ca60b4db2be8fb58e4056d.json":
+			return &http.Response{
+				Status:     http.StatusText(http.StatusOK),
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"endpoint":"https://ev.sour.is/inbox/01GPYAXX53N6GCKJV2BPJGTQPB","key":"kex1ac2s0vwskgctgjucqldtd5k4v5xjxv80smf0n9dqqags43keu7usqfh9ud"}`)),
+			}, nil
+		}
+		return &http.Response{Status: http.StatusText(http.StatusNotFound), StatusCode: http.StatusNotFound}, nil
 	})
 	defer func() { http.DefaultClient = &http.Client{} }()
 
@@ -60,6 +72,12 @@ func TestClient(t *testing.T) {
 	c, err := client.New(sm, "me@sour.is")
 	is.NoErr(err)
 	is.True(c != nil)
+
+	ctx := context.Background()
+
+	ok, err := c.Chat(ctx, "them@sour.is")
+	is.NoErr(err)
+	is.True(ok)
 }
 
 type httpMock func(*http.Request) (*http.Response, error)

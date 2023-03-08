@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"git.mills.io/prologic/msgbus/client"
 	"github.com/keys-pub/keys"
 	"github.com/oklog/ulid/v2"
 	"go.mills.io/salty"
@@ -48,7 +47,6 @@ type Client struct {
 	addr Addr
 
 	driver Driver
-	sub    *client.Subscriber
 
 	on map[any][]any
 }
@@ -67,7 +65,7 @@ func WithDriver(d Driver) withDriver {
 }
 
 func (d withDriver) ApplyClient(c *Client) {
-	c.driver = d
+	c.driver = d.Driver
 }
 
 func New(sm SessionManager, me string, opts ...Option) (*Client, error) {
@@ -76,7 +74,7 @@ func New(sm SessionManager, me string, opts ...Option) (*Client, error) {
 		return nil, fmt.Errorf("lookup addr: %w", err)
 	}
 
-	cl := &Client{
+	c := &Client{
 		sm:     locker.New(sm),
 		addr:   addr,
 		driver: nilDriver{},
@@ -84,10 +82,14 @@ func New(sm SessionManager, me string, opts ...Option) (*Client, error) {
 	}
 
 	for _, o := range opts {
-		o.ApplyClient(cl)
+		o.ApplyClient(c)
 	}
 
-	return cl, nil
+	On(c, c.handleSaltPack)
+	On(c, c.handleRatchet)
+	On(c, c.handleOther)
+
+	return c, nil
 }
 
 func (c *Client) Run(ctx context.Context) error {
@@ -118,6 +120,10 @@ func dispatch[T any](ctx context.Context, c *Client, args T) error {
 	return wg.Wait()
 }
 
+type OnInput struct {
+	Position int64
+	Payload  string
+}
 type OnOfferSent struct {
 	ID   ulid.ULID
 	Them string
@@ -168,7 +174,7 @@ type OnSaltySent struct {
 	Raw  string
 }
 type OnReceived struct {
-	Raw string
+	Raw string // raw is string to be hashable.
 }
 
 func (c *Client) Use(ctx context.Context, fn func(context.Context, SessionManager) error) error {
@@ -333,53 +339,70 @@ func (c *Client) Context() (context.Context, context.CancelFunc) {
 	return context.WithCancel(ctx)
 }
 
-func (c *Client) Handler(pos int64, input string) error {
+func (c *Client) Input(in OnInput) error {
 	ctx, cancel := c.Context()
 	defer cancel()
 
-	if strings.HasPrefix(input, "BEGIN SALTPACK ENCRYPTED MESSAGE.") {
-		return c.sm.Use(ctx, func(ctx context.Context, sm SessionManager) error {
-			// Update session manager position in stream if supported.
-			if s, ok := sm.(interface{ SetPosition(int64) }); ok {
-				s.SetPosition(pos + 1)
-			}
+	return dispatch(ctx, c, in)
+}
 
-			text, key, err := salty.Decrypt(sm.Identity(), []byte(input))
-			if err != nil {
-				return err
-			}
+func (c *Client) handleSaltPack(ctx context.Context, in OnInput) {
+	input := string(in.Payload)
 
-			msg, err := lextwt.ParseSalty(string(text))
-			if err != nil {
-				return err
-			}
-
-			switch msg := msg.(type) {
-			case *lextwt.SaltyEvent:
-				return dispatch(ctx, c, OnSaltyEventReceived{key, msg})
-
-			case *lextwt.SaltyText:
-				return dispatch(ctx, c, OnSaltyTextReceived{key, msg})
-
-			}
-
-			return nil
-		})
+	if !strings.HasPrefix(input, "BEGIN SALTPACK ENCRYPTED MESSAGE.") {
+		return
 	}
 
+	err := c.sm.Use(ctx, func(ctx context.Context, sm SessionManager) error {
+		// Update session manager position in stream if supported.
+		if s, ok := sm.(interface{ SetPosition(int64) }); ok {
+			s.SetPosition(in.Position + 1)
+		}
+
+		text, key, err := salty.Decrypt(sm.Identity(), []byte(in.Payload))
+		if err != nil {
+			return err
+		}
+
+		msg, err := lextwt.ParseSalty(string(text))
+		if err != nil {
+			return err
+		}
+
+		switch msg := msg.(type) {
+		case *lextwt.SaltyEvent:
+			return dispatch(ctx, c, OnSaltyEventReceived{key, msg})
+
+		case *lextwt.SaltyText:
+			return dispatch(ctx, c, OnSaltyTextReceived{key, msg})
+
+		}
+
+		return nil
+	})
+
+	dispatch(ctx, c, err)
+}
+
+func (c *Client) handleRatchet(ctx context.Context, in OnInput) {
+	input := string(in.Payload)
+
 	if !(strings.HasPrefix(input, "!RAT!") && strings.HasSuffix(input, "!CHT!")) {
-		return dispatch(ctx, c, OnReceived{input})
+		return
 	}
 
 	id, xmsg, err := readMsg(input)
 	if err != nil {
-		return fmt.Errorf("reading msg: %w", err)
+		err = fmt.Errorf("reading msg: %w", err)
+		dispatch(ctx, c, err)
+
+		return
 	}
 
-	return c.sm.Use(ctx, func(ctx context.Context, sm SessionManager) error {
+	err = c.sm.Use(ctx, func(ctx context.Context, sm SessionManager) error {
 		// Update session manager position in stream if supported.
 		if s, ok := sm.(interface{ SetPosition(int64) }); ok {
-			s.SetPosition(pos + 1)
+			s.SetPosition(in.Position + 1)
 		}
 
 		// unseal message if required.
@@ -468,6 +491,22 @@ func (c *Client) Handler(pos int64, input string) error {
 
 		return nil
 	})
+
+	dispatch(ctx, c, err)
+}
+
+func (c *Client) handleOther(ctx context.Context, in OnInput) {
+	input := string(in.Payload)
+
+	if strings.HasPrefix(input, "!RAT!") && strings.HasSuffix(input, "!CHT!") {
+		return
+	}
+
+	if strings.HasPrefix(input, "BEGIN SALTPACK ENCRYPTED MESSAGE.") {
+		return
+	}
+
+	dispatch(ctx, c, OnReceived{string(in.Payload)})
 }
 
 func (c *Client) sendMsg(session *session.Session, msg string) error {
