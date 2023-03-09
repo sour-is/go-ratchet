@@ -13,9 +13,9 @@ func WithMsgbus(pos int64) client.Option {
 		addr := c.Me()
 		uri, inbox := saltyim.SplitInbox(addr.Endpoint().String())
 		bus := mb.NewClient(uri, nil)
-		sub := bus.Subscribe(inbox, pos, hdlr(c.Handler))
+		sub := bus.Subscribe(inbox, pos, hdlr(c.Input))
 
-		client.WithDriver(sub)
+		client.WithDriver(sub).ApplyClient(c)
 	})
 }
 
@@ -25,9 +25,9 @@ func (fn fn) ApplyClient(c *client.Client) {
 	fn(c)
 }
 
-func hdlr(fn func(int64, string) error) msgbus.HandlerFunc {
+func hdlr(fn func(client.OnInput) error) msgbus.HandlerFunc {
 	return func(msg *msgbus.Message) error {
-		_ = fn(msg.ID, string(msg.Payload))
+		_ = fn(client.OnInput{Position: msg.ID, Payload: string(msg.Payload)})
 		return nil
 	}
 }

@@ -56,7 +56,6 @@ type model struct {
 }
 
 func InitialModel(c *client.Client, them string) model {
-
 	ti := textinput.New()
 	ti.Placeholder = "Message"
 	ti.Prompt = "foo? "
@@ -82,6 +81,7 @@ func InitialModel(c *client.Client, them string) model {
 	client.On(c, func(ctx context.Context, args client.OnSaltyTextReceived) { m.Update(args) })
 	client.On(c, func(ctx context.Context, args client.OnSaltyEventReceived) { m.Update(args) })
 	client.On(c, func(ctx context.Context, args client.OnReceived) { m.Update(args) })
+	client.On(c, func(ctx context.Context, args error) { m.Update(args) })
 
 	return m
 }
@@ -136,6 +136,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case client.OnSessionClosed:
 		fmt.Fprintf(m.content, "\033[90m%s ::: session closed %s :::\033[0m\n", getTime(msg.ID).Format("15:04:05"), msg.Them)
 
+	case error:
+		fmt.Fprintf(m.content, "\033[90m%s ::: ERROR %s :::\033[0m\n", time.Now().Format("15:04:05"), msg.Error())
+
 	case client.OnReceived:
 		fmt.Fprintf(m.content, "\033[90m%s ::: unknown message: %s\033[0m\n", time.Now().Format("15:04:05"), msg.Raw)
 
@@ -168,6 +171,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if err != nil {
 						fmt.Fprintf(m.content, "ERR: %s\n", err)
 					}
+					break
 				}
 
 				if m.c.Me().String() == sp[1] {
@@ -183,6 +187,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				break
 			}
+
 			if strings.HasPrefix(input, "/close") {
 				sp := strings.Fields(input)
 
