@@ -18,7 +18,7 @@ run-cover:
 	go build -cover -o ./ratchet-cover .
 	GOCOVERDIR=cover GORUN=./ratchet-cover make simulate
 	go test -cover ./... -test.gocoverdir=$(PWD)/cover/
-	go tool covdata percent -i=cover/
+	go tool covdata percent -i=cover/ -pkg go.salty.im/ratchet/...
 
 run-ui:
 	go build . && ./ratchet ui --key $(ALICE_KEY) --state ./tmp
