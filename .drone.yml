@@ -16,6 +16,10 @@ steps:
     commands:
       - make test
 
+  - name: ☂ Cover
+    commands:
+      - make run-cover
+
 trigger:
   branch:
     - main

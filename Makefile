@@ -14,7 +14,8 @@ build:
 test: ## Run test suite
 	@go test -failfast -shuffle on -race -cover -coverprofile=coverage.out ./...
 run-cover:
-	rm cover/cov*
+	rm -rf cover
+	mkdir -p cover
 	go build -cover -o ./ratchet-cover .
 	GOCOVERDIR=cover GORUN=./ratchet-cover make simulate
 	go test -cover ./... -test.gocoverdir=$(PWD)/cover/
