@@ -4,14 +4,16 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/docopt/docopt-go"
-	"github.com/oklog/ulid/v2"
 	"github.com/sour-is/ev"
 	diskstore "github.com/sour-is/ev/pkg/es/driver/disk-store"
 	memstore "github.com/sour-is/ev/pkg/es/driver/mem-store"
@@ -20,8 +22,9 @@ import (
 	"go.uber.org/multierr"
 	"golang.org/x/sync/errgroup"
 
+	"go.salty.im/ratchet/cli"
 	"go.salty.im/ratchet/client"
-	"go.salty.im/ratchet/client/driver-msgbus"
+	driver_msgbus "go.salty.im/ratchet/client/driver-msgbus"
 	"go.salty.im/ratchet/interactive"
 	"go.salty.im/ratchet/session"
 	"go.salty.im/ratchet/ui"
@@ -95,19 +98,28 @@ func run(ctx context.Context, opts opts) error {
 
 	switch {
 	case opts.Offer:
-		return doOffer(ctx, opts)
+		return cli.Offer(ctx, opts.Key, opts.State, opts.Them)
 
 	case opts.Send:
-		return doSend(ctx, opts)
+		input, err := readInput(opts)
+		if err != nil {
+			return err
+		}
+
+		return cli.Send(ctx, opts.Key, opts.State, opts.Them, input)
 
 	case opts.Recv:
-		return doRecv(ctx, opts)
+		input, err := readInput(opts)
+		if err != nil {
+			return err
+		}
+		return cli.Recv(ctx, opts.Key, opts.State, opts.Them, input)
 
 	case opts.Close:
-		return doClose(ctx, opts)
+		return cli.Close(ctx, opts.Key, opts.State, opts.Them)
 
 	case opts.Chat:
-		me, key, err := readSaltyIdentity(opts.Key)
+		me, key, err := cli.ReadSaltyIdentity(opts.Key)
 		if err != nil {
 			return fmt.Errorf("reading keyfile: %w", err)
 		}
@@ -130,7 +142,7 @@ func run(ctx context.Context, opts opts) error {
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 
-		me, key, err := readSaltyIdentity(opts.Key)
+		me, key, err := cli.ReadSaltyIdentity(opts.Key)
 		if err != nil {
 			return fmt.Errorf("reading keyfile: %w", err)
 		}
@@ -173,10 +185,27 @@ func log(a ...any) {
 	fmt.Fprintf(os.Stderr, "\033[90m%s\033[0m\n", fmt.Sprint(a...))
 }
 
-func toULID(b []byte) ulid.ULID {
-	var id ulid.ULID
-	copy(id[:], b)
-	return id
+func readInput(opts opts) (msg string, err error) {
+	var r io.ReadCloser
+
+	if opts.MsgStdin {
+		r = os.Stdin
+	} else if opts.MsgFile != "" {
+		r, err = os.Open(opts.MsgFile)
+		if err != nil {
+			return
+		}
+	} else {
+		return strings.TrimSpace(opts.Msg), nil
+	}
+
+	msg, err = bufio.NewReader(r).ReadString('\n')
+	if err != nil {
+		err = fmt.Errorf("read input: %w", err)
+		return
+	}
+
+	return strings.TrimSpace(msg), nil
 }
 
 func setupChatlog(ctx context.Context, path string) (*ev.EventStore, error) {

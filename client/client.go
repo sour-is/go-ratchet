@@ -127,10 +127,12 @@ type OnInput struct {
 type OnOfferSent struct {
 	ID   ulid.ULID
 	Them string
+	Raw  string
 }
 type OnOfferReceived struct {
-	ID   ulid.ULID
-	Them string
+	ID         ulid.ULID
+	Them       string
+	PendingAck string
 }
 type OnSessionStarted struct {
 	ID   ulid.ULID
@@ -206,7 +208,11 @@ func (c *Client) Chat(ctx context.Context, them string) (bool, error) {
 				return err
 			}
 
-			return dispatch(ctx, c, OnOfferSent{toULID(session.LocalUUID), them})
+			return dispatch(ctx, c, OnOfferSent{
+				ID:   toULID(session.LocalUUID),
+				Them: them,
+				Raw:  msg,
+			})
 		}
 		if err != nil {
 			return err
@@ -282,6 +288,15 @@ func (c *Client) Close(ctx context.Context, them string) error {
 		}
 
 		err = c.sendMsg(session, msg)
+		if err != nil {
+			return err
+		}
+
+		err = dispatch(ctx, c, OnMessageSent{
+			ID:     toULID(session.LocalUUID),
+			Them:   them,
+			Sealed: msg,
+		})
 		if err != nil {
 			return err
 		}
@@ -428,10 +443,6 @@ func (c *Client) handleRatchet(ctx context.Context, in OnInput) {
 			if err != nil {
 				return fmt.Errorf("get session: %w", err)
 			}
-			err = dispatch(ctx, c, OnOfferReceived{toULID(xmsg.ID()), offer.Nick()})
-			if err != nil {
-				return err
-			}
 		} else {
 			sess, err = sm.Get(id)
 			if errors.Is(err, os.ErrNotExist) {
@@ -449,6 +460,17 @@ func (c *Client) handleRatchet(ctx context.Context, in OnInput) {
 		isEstablished, isClosed, plaintext, err := sess.ReceiveMsg(xmsg)
 		if err != nil {
 			return fmt.Errorf("session receive: %w", err)
+		}
+
+		if sess.PendingAck != "" {
+			err = dispatch(ctx, c, OnOfferReceived{
+				ID: toULID(xmsg.ID()), 
+				Them: sess.Name,
+				PendingAck: sess.PendingAck,
+			})
+			if err != nil {
+				return err
+			}
 		}
 
 		err = sm.Put(sess)
