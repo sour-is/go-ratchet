@@ -10,14 +10,18 @@ BOB=bob@sour.is
 BOB_KEY=bob.key
 
 build:
+	@go version
+	@go env
 	@go build .
 test: ## Run test suite
+	@go version
 	@go test -failfast -shuffle on -race -cover -coverprofile=coverage.out ./...
 run-cover:
-	rm -rf cover
-	mkdir -p cover
+	@go version
+	@rm -rf cover
+	@mkdir -p cover
 	go build -cover -o ./ratchet-cover .
-	GOCOVERDIR=cover GORUN=./ratchet-cover make simulate
+	@GOCOVERDIR=cover GORUN=./ratchet-cover make simulate
 	go test -cover ./... -test.gocoverdir=$(PWD)/cover/
 	go tool covdata percent -i=cover/ -pkg go.salty.im/ratchet/...
 
