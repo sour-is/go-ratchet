@@ -15,63 +15,61 @@ import (
 
 	"github.com/oklog/ulid/v2"
 	"go.salty.im/ratchet/client"
+	"go.salty.im/ratchet/session/mem"
 )
 
 type service struct {
 	prompt string
 	*client.Client
+	*mem.MemSession
 }
 
 func New(c *client.Client) *service {
-	return &service{Client: c}
+	return &service{Client: c, MemSession: mem.NewMemSession(c)}
 }
 
 func (svc *service) Run(ctx context.Context, me, them string) error {
-	go svc.Interactive(ctx, me, them)
-	return svc.Client.Run(ctx)
+	ctx2, cancel := context.WithCancel(ctx)
+	go svc.Interactive(ctx, me, them, cancel)
+	return svc.Client.Run(ctx2)
 }
 
-func (svc *service) Interactive(ctx context.Context, me, them string) {
+func (svc *service) Interactive(ctx context.Context, me, them string, quit func()) {
 	client.On(svc.Client, func(ctx context.Context, args client.OnOfferSent) {
-		fmt.Printf("\n\033[1A\r\033[2K\033[90m::: offer sent %s :::\033[0m\n", args.Them)
-		fmt.Printf(svc.prompt)
+		fmt.Print(CLEAR_LINE, formatMsg(me, args), "\n", svc.prompt)
 	})
 	client.On(svc.Client, func(ctx context.Context, args client.OnOfferReceived) {
-		fmt.Printf("\n\033[1A\r\033[2K\033[90m::: offer from %s :::\033[0m\n", args.Them)
-		fmt.Printf(svc.prompt)
+		fmt.Print("\n", CLEAR_LINE, formatMsg(me, args), "\n", svc.prompt)
 	})
 	client.On(svc.Client, func(ctx context.Context, args client.OnSessionStarted) {
-		fmt.Printf("\n\033[1A\r\033[2K\033[90m::: session started with %s :::\033[0m\n", args.Them)
-		fmt.Printf(svc.prompt)
+		fmt.Print("\n", CLEAR_LINE, formatMsg(me, args), "\n", svc.prompt)
 	})
 	client.On(svc.Client, func(ctx context.Context, args client.OnSessionClosed) {
-		fmt.Printf("\n\033[1A\r\033[2K\033[90m::: session closed with %s :::\033[0m\n", args.Them)
 		if them == args.Them {
 			svc.setPrompt(me, "")
 		}
-		fmt.Printf(svc.prompt)
+		fmt.Print("\n", CLEAR_LINE, formatMsg(me, args), "\n", svc.prompt)
 	})
 	client.On(svc.Client, func(ctx context.Context, args client.OnMessageReceived) {
-		fmt.Printf("\n\033[1A\r\033[2K%s <\033[31m%s\033[0m> %s\n", getTime(args.ID).Format("15:04:05"), args.Them, args.Msg.LiteralText())
-		fmt.Printf(svc.prompt)
+		fmt.Print("\n", CLEAR_LINE, formatMsg(me, args), "\n", svc.prompt)
 	})
 	client.On(svc.Client, func(ctx context.Context, args client.OnMessageSent) {
-		fmt.Printf("\033[1A\r\033[2K%s <\033[31m%s\033[0m> %s\n", time.Now().Format("15:04:05"), me, args.Msg.LiteralText())
+		fmt.Print(CLEAR_LINE, formatMsg(me, args), "\n")
 	})
 	client.On(svc.Client, func(ctx context.Context, args client.OnSaltySent) {
-		fmt.Printf("\033[1A\r\033[2K%s <\033[34m%s\033[0m> %s\n", time.Now().Format("15:04:05"), me, args.Msg.LiteralText())
+		fmt.Print(CLEAR_LINE, formatMsg(me, args), "\n")
 	})
 	client.On(svc.Client, func(ctx context.Context, args client.OnSaltyTextReceived) {
-		fmt.Printf("\n\033[1A\r\033[2K%s <\033[34m%s\033[0m> %s\n", time.Now().Format("15:04:05"), args.Msg.User, args.Msg.LiteralText())
-		fmt.Printf(svc.prompt)
+		fmt.Print("\n", CLEAR_LINE, formatMsg(me, args), "\n", svc.prompt)
 	})
 	client.On(svc.Client, func(ctx context.Context, args client.OnSaltyEventReceived) {
-		fmt.Printf("\n\033[1A\r\033[2K\033[90m::: salty: %s(%s)\033[0m\n", args.Event.Command, strings.Join(args.Event.Args, ", "))
-		fmt.Printf(svc.prompt)
+		fmt.Print("\n", CLEAR_LINE, formatMsg(me, args), "\n", svc.prompt)
 	})
 	client.On(svc.Client, func(ctx context.Context, args client.OnReceived) {
-		fmt.Printf("\n\033[1A\r\033[2K\033[90m::: unknown message: %s\033[0m\n", args.Raw)
-		fmt.Printf(svc.prompt)
+		fmt.Print("\n", CLEAR_LINE, formatMsg(me, args), "\n", svc.prompt)
+	})
+	client.On(svc.Client, func(ctx context.Context, args error) {
+		fmt.Print(CLEAR_LINE, formatMsg(me, args), "\n", svc.prompt)
 	})
 
 	err := syscall.SetNonblock(0, true)
@@ -117,6 +115,32 @@ func (svc *service) Interactive(ctx context.Context, me, them string) {
 			continue
 		}
 
+		if strings.HasPrefix(input, "/log") {
+			logname := ""
+
+			if strings.HasPrefix(input, "/log ") {
+				logname = strings.TrimPrefix(input, "/log ")
+			}
+
+			if logname == "" {
+				if them != "" {
+					logname = "user:" + them
+				} else {
+					logname = "system"
+				}
+			}
+
+			log, err := svc.ReadLog(ctx, logname, -1, -20)
+			if err != nil {
+				fmt.Println(err)
+			}
+			fmt.Println("\nLOG:", logname)
+			for _, msg := range log {
+				fmt.Println(formatMsg(me, msg))
+			}
+			continue
+		}
+
 		if strings.HasPrefix(input, "/chat") {
 			err = svc.doChat(ctx, me, &them, input)
 			if err != nil {
@@ -130,6 +154,10 @@ func (svc *service) Interactive(ctx context.Context, me, them string) {
 				log("ERR: ", err)
 			}
 			continue
+		}
+		if strings.HasPrefix(input, "/quit") {
+			quit()
+			return
 		}
 		if strings.HasPrefix(input, "/salty") {
 			target, msg, _ := strings.Cut(strings.TrimPrefix(input, "/salty "), " ")
@@ -170,9 +198,18 @@ func (svc *service) doChat(ctx context.Context, me string, them *string, input s
 	}
 
 	*them = sp[1]
+
+	log, err := svc.ReadLog(ctx, "user:"+*them, -1, -20)
+	if err != nil {
+		return err
+	}
+
+	for _, msg := range log {
+		fmt.Println(formatMsg(me, msg))
+	}
 	svc.setPrompt(me, *them)
 
-	_, err := svc.Chat(ctx, *them)
+	_, err = svc.Chat(ctx, *them)
 	if err == nil {
 		return err
 	}
@@ -191,6 +228,7 @@ func (svc *service) doClose(ctx context.Context, me string, them *string, input 
 		return nil
 	}
 
+	*them = ""
 	svc.setPrompt(me, "")
 	fmt.Printf("\033[1A\r\033[2K<%s> %s\n", me, input)
 	return svc.Close(ctx, target)
@@ -237,3 +275,38 @@ func getTime(u ulid.ULID) time.Time {
 func log(a ...any) {
 	fmt.Fprintf(os.Stderr, "\033[90m%s\033[0m\n", fmt.Sprint(a...))
 }
+
+func formatMsg(me string, msg any) string {
+	switch msg := msg.(type) {
+	case client.OnOfferSent:
+		return fmt.Sprintf("%s::: offer sent %s :::%s", COLOR_GREY, msg.Them, RESET_COLOR)
+	case client.OnOfferReceived:
+		return fmt.Sprintf("%s::: offer from %s :::%s", COLOR_GREY, msg.Them, RESET_COLOR)
+	case client.OnSessionStarted:
+		return fmt.Sprintf("%s::: session started with %s :::%s", COLOR_GREY, msg.Them, RESET_COLOR)
+	case client.OnSessionClosed:
+		return fmt.Sprintf("%s::: session closed with %s :::%s", COLOR_GREY, msg.Them, RESET_COLOR)
+	case client.OnMessageReceived:
+		return fmt.Sprintf("%s%s <%s%s%s> %s%s", COLOR_GREY, getTime(msg.ID).Format("15:04:05"), COLOR_RED, msg.Them, COLOR_GREY, RESET_COLOR, msg.Msg.LiteralText())
+	case client.OnMessageSent:
+		return fmt.Sprintf("%s%s <%s%s%s> %s%s", COLOR_GREY, getTime(msg.ID).Format("15:04:05"), COLOR_RED, me, COLOR_GREY, RESET_COLOR, msg.Msg.LiteralText())
+	case client.OnSaltySent:
+		return fmt.Sprintf("%s%s <%s%s%s> %s%s", COLOR_GREY, msg.Msg.Timestamp.DateTime().Format("15:04:05"), COLOR_BLUE, me, COLOR_GREY, RESET_COLOR, msg.Msg.LiteralText())
+	case client.OnSaltyTextReceived:
+		return fmt.Sprintf("%s%s <%s%s%s> %s%s", COLOR_GREY, msg.Msg.Timestamp.DateTime().Format("15:04:05"), COLOR_BLUE, msg.Msg.User, COLOR_GREY, RESET_COLOR, msg.Msg.LiteralText())
+	case client.OnSaltyEventReceived:
+		return fmt.Sprintf("%s::: salty: %s(%s)%s", COLOR_GREY, msg.Event.Command, strings.Join(msg.Event.Args, ", "), RESET_COLOR)
+	case client.OnReceived:
+		return fmt.Sprintf("%s::: unknown message: %s%s", COLOR_GREY, msg.Raw, RESET_COLOR)
+	default:
+		return fmt.Sprint(msg)
+	}
+}
+
+const (
+	CLEAR_LINE  = "\033[1A\033[2K\r"
+	COLOR_GREY  = "\033[90m"
+	COLOR_RED   = "\033[31m"
+	COLOR_BLUE  = "\033[34m"
+	RESET_COLOR = "\033[0m"
+)

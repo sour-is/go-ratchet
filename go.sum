@@ -458,8 +458,6 @@ go.opentelemetry.io/otel/trace v1.9.0/go.mod h1:2737Q0MuG8q1uILYm2YYVkAyLtOofiTN
 go.opentelemetry.io/proto/otlp v0.7.0/go.mod h1:PqfVotwruBrMGOCsRd/89rSnXhoiJIqeYNgFYFoEGnI=
 go.opentelemetry.io/proto/otlp v0.18.0 h1:W5hyXNComRa23tGpKwG+FRAc4rfF6ZUg1JReK+QHS80=
 go.opentelemetry.io/proto/otlp v0.18.0/go.mod h1:H7XAot3MsfNsj7EXtrA2q5xSNQ10UqI405h3+duxN4U=
-go.salty.im/saltyim v0.0.0-20230227224714-778133f763d9 h1:PHGjvpuTZv5QQRKZ8yffeS5cLgJgnD/w+Xunrq+Jm+M=
-go.salty.im/saltyim v0.0.0-20230227224714-778133f763d9/go.mod h1:2GAdSXmYekn4VKb/hX1u5M1W6xvJk7QpczDKKDhfgWY=
 go.salty.im/saltyim v0.0.0-20230305163315-e4a8fc193309 h1:FPte9DznxhwqZ4LygGfoyfKiss8V1kLsxYoDBM0hjV0=
 go.salty.im/saltyim v0.0.0-20230305163315-e4a8fc193309/go.mod h1:0ZvEgBpM3r6SwvoP2JazCrFSq8Cm51+Y3cjVRT2MzPQ=
 go.uber.org/atomic v1.7.0/go.mod h1:fEN4uk6kAWBTFdckzkM89CLk9XfWZrxpCo0nPH17wJc=

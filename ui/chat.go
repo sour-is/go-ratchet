@@ -51,6 +51,7 @@ type model struct {
 	content   *strings.Builder
 	ready     bool
 	viewport  viewport.Model
+	nicklist  viewport.Model
 	textInput textinput.Model
 	err       error
 }
@@ -105,42 +106,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds []tea.Cmd
 	)
 
+	me := m.c.Me().String()
 	switch msg := msg.(type) {
-	case client.OnMessageReceived:
-		for _, e := range msg.Msg.Events {
-			fmt.Fprintf(m.content, "\033[90m%s :: \033[34m%s\033[90m: \033[0m%s\n", time.Now().Format("15:04:05"), e.Command, strings.Join(e.Args, ", "))
-		}
-		fmt.Fprintf(m.content, "\033[90m%s <\033[31m%s\033[90m> \033[0m%s\n", msg.Msg.Timestamp.DateTime().Format("15:04:05"), msg.Them, msg.Msg.LiteralText())
-
-	case client.OnMessageSent:
-		fmt.Fprintf(m.content, "\033[90m%s <\033[31m%s\033[90m> \033[0m%s\n", msg.Msg.Timestamp.DateTime().Format("15:04:05"), m.c.Me().String(), msg.Msg.LiteralText())
-
-	case client.OnSaltyTextReceived:
-		fmt.Fprintf(m.content, "\033[90m%s <\033[34m%s\033[90m> \033[0m%s\n", msg.Msg.Timestamp.DateTime().Format("15:04:05"), msg.Msg.User, msg.Msg.LiteralText())
-
-	case client.OnSaltyEventReceived:
-		fmt.Fprintf(m.content, "\033[90m%s :: \033[34m%s\033[90m: \033[0m%s\n", time.Now().Format("15:04:05"), msg.Event.Command, strings.Join(msg.Event.Args, ", "))
-
-	case client.OnSaltySent:
-		fmt.Fprintf(m.content, "\033[90m%s <\033[34m%s\033[90m> \033[0m%s\n", msg.Msg.Timestamp.DateTime().Format("15:04:05"), m.c.Me().String(), msg.Msg.LiteralText())
-
-	case client.OnOfferSent:
-		fmt.Fprintf(m.content, "\033[90m%s ::: offer sent %s :::\033[0m\n", getTime(msg.ID).Format("15:04:05"), msg.Them)
-
-	case client.OnOfferReceived:
-		fmt.Fprintf(m.content, "\033[90m%s ::: offer received %s :::\033[0m\n", getTime(msg.ID).Format("15:04:05"), msg.Them)
-
-	case client.OnSessionStarted:
-		fmt.Fprintf(m.content, "\033[90m%s ::: session started %s :::\033[0m\n", getTime(msg.ID).Format("15:04:05"), msg.Them)
-
-	case client.OnSessionClosed:
-		fmt.Fprintf(m.content, "\033[90m%s ::: session closed %s :::\033[0m\n", getTime(msg.ID).Format("15:04:05"), msg.Them)
-
-	case error:
-		fmt.Fprintf(m.content, "\033[90m%s ::: ERROR %s :::\033[0m\n", time.Now().Format("15:04:05"), msg.Error())
-
-	case client.OnReceived:
-		fmt.Fprintf(m.content, "\033[90m%s ::: unknown message: %s\033[0m\n", time.Now().Format("15:04:05"), msg.Raw)
+	case client.OnMessageReceived,
+		client.OnMessageSent,
+		client.OnSaltyTextReceived,
+		client.OnSaltyEventReceived,
+		client.OnSaltySent,
+		client.OnOfferSent,
+		client.OnOfferReceived,
+		client.OnSessionStarted,
+		client.OnSessionClosed,
+		client.OnReceived,
+		error:
+		fmt.Fprintln(m.content, formatMsg(me, msg))
 
 	case tea.KeyMsg:
 		switch msg.Type {
@@ -187,7 +166,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				break
 			}
-
 			if strings.HasPrefix(input, "/close") {
 				sp := strings.Fields(input)
 
@@ -217,6 +195,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					fmt.Fprintln(m.content, "ERR: ", err)
 				}
 				break
+			}
+			if strings.HasPrefix(input, "/quit") {
+				return m, tea.Quit
 			}
 
 			if m.them == "" {
@@ -267,10 +248,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// This is needed for high-performance rendering only.
 			cmds = append(cmds, viewport.Sync(m.viewport))
 		}
-
-	case errMsg:
-		m.err = msg
-		return m, nil
 	}
 
 	// Handle keyboard and mouse events in the viewport
@@ -320,3 +297,51 @@ func max(a, b int) int {
 func getTime(u ulid.ULID) time.Time {
 	return time.UnixMilli(int64(u.Time()))
 }
+
+func formatMsg(me string, msg any) string {
+	switch msg := msg.(type) {
+	case client.OnOfferSent:
+		return fmt.Sprintf("%s::: offer sent %s :::%s", COLOR_GREY, msg.Them, RESET_COLOR)
+	case client.OnOfferReceived:
+		return fmt.Sprintf("%s::: offer from %s :::%s", COLOR_GREY, msg.Them, RESET_COLOR)
+	case client.OnSessionStarted:
+		return fmt.Sprintf("%s::: session started with %s :::%s", COLOR_GREY, msg.Them, RESET_COLOR)
+	case client.OnSessionClosed:
+		return fmt.Sprintf("%s::: session closed with %s :::%s", COLOR_GREY, msg.Them, RESET_COLOR)
+	case client.OnMessageReceived:
+		var b strings.Builder
+		ts := getTime(msg.ID).Format("15:04:05")
+		for _, e := range msg.Msg.Events {
+			fmt.Fprintf(&b, "%s%s :: event: %s(%s)%s", COLOR_GREY, ts, e.Command, strings.Join(e.Args, ", "), RESET_COLOR)
+			b.WriteRune('\n')
+		}
+		fmt.Fprintf(&b, "%s%s <%s%s%s> %s%s", COLOR_GREY, ts, COLOR_RED, msg.Them, COLOR_GREY, RESET_COLOR, msg.Msg.LiteralText())
+		return b.String()
+	case client.OnMessageSent:
+		return fmt.Sprintf("%s%s <%s%s%s> %s%s", COLOR_GREY, getTime(msg.ID).Format("15:04:05"), COLOR_RED, me, COLOR_GREY, RESET_COLOR, msg.Msg.LiteralText())
+	case client.OnSaltySent:
+		return fmt.Sprintf("%s%s <%s%s%s> %s%s", COLOR_GREY, msg.Msg.Timestamp.DateTime().Format("15:04:05"), COLOR_BLUE, me, COLOR_GREY, RESET_COLOR, msg.Msg.LiteralText())
+	case client.OnSaltyTextReceived:
+		var b strings.Builder
+		ts := msg.Msg.Timestamp.DateTime().Format("15:04:05")
+		for _, e := range msg.Msg.Events {
+			fmt.Fprintf(&b, "%s%s :: event: %s(%s)%s", COLOR_GREY, ts, e.Command, strings.Join(e.Args, ", "), RESET_COLOR)
+			b.WriteRune('\n')
+		}
+		fmt.Fprintf(&b, "%s%s <%s%s%s> %s%s", COLOR_GREY, ts, COLOR_BLUE, msg.Msg.User, COLOR_GREY, RESET_COLOR, msg.Msg.LiteralText())
+		return b.String()
+	case client.OnSaltyEventReceived:
+		return fmt.Sprintf("%s::: event: %s(%s)%s", COLOR_GREY, msg.Event.Command, strings.Join(msg.Event.Args, ", "), RESET_COLOR)
+	case client.OnReceived:
+		return fmt.Sprintf("%s::: unknown message: %s%s", COLOR_GREY, msg.Raw, RESET_COLOR)
+	default:
+		return fmt.Sprint(msg)
+	}
+}
+
+const (
+	COLOR_GREY  = "\033[90m"
+	COLOR_RED   = "\033[31m"
+	COLOR_BLUE  = "\033[34m"
+	RESET_COLOR = "\033[0m"
+)

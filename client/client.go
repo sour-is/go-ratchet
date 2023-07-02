@@ -157,6 +157,11 @@ type OnMessageSent struct {
 	Msg    *Msg
 	Sealed string
 }
+type OnCloseSent struct {
+	ID     ulid.ULID
+	Them   string
+	Sealed string
+}
 type OnSessionClosed struct {
 	ID   ulid.ULID
 	Them string
@@ -225,12 +230,12 @@ func (c *Client) Chat(ctx context.Context, them string) (bool, error) {
 				return err
 			}
 
+			session.PendingAck = ""
 			err = sm.Put(session)
 			if err != nil {
 				return err
 			}
 			established = true
-			session.PendingAck = ""
 
 			return dispatch(ctx, c, OnSessionStarted{toULID(session.LocalUUID), them})
 		}
@@ -245,8 +250,10 @@ func (c *Client) Send(ctx context.Context, them, text string, events ...*Event) 
 			return err
 		}
 
+		msgID := toULID(encTime(session.LocalUUID))
+
 		msg := lextwt.NewSaltyText(
-			lextwt.NewDateTime(time.Now(), ""),
+			lextwt.NewDateTime(ulid.Time(msgID.Time()), ""),
 			lextwt.NewSaltyUser(c.Me().User(), c.Me().Domain()),
 			toElems(lextwt.NewText(text), events)...,
 		)
@@ -267,7 +274,7 @@ func (c *Client) Send(ctx context.Context, them, text string, events ...*Event) 
 		}
 
 		return dispatch(ctx, c, OnMessageSent{
-			ID:     toULID(session.LocalUUID),
+			ID:     msgID,
 			Them:   them,
 			Raw:    msg.Literal(),
 			Msg:    msg,
@@ -292,7 +299,7 @@ func (c *Client) Close(ctx context.Context, them string) error {
 			return err
 		}
 
-		err = dispatch(ctx, c, OnMessageSent{
+		err = dispatch(ctx, c, OnCloseSent{
 			ID:     toULID(session.LocalUUID),
 			Them:   them,
 			Sealed: msg,
@@ -396,7 +403,9 @@ func (c *Client) handleSaltPack(ctx context.Context, in OnInput) {
 		return nil
 	})
 
-	dispatch(ctx, c, err)
+	if err != nil {
+		dispatch(ctx, c, err)
+	}
 }
 
 func (c *Client) handleRatchet(ctx context.Context, in OnInput) {
@@ -464,8 +473,8 @@ func (c *Client) handleRatchet(ctx context.Context, in OnInput) {
 
 		if sess.PendingAck != "" {
 			err = dispatch(ctx, c, OnOfferReceived{
-				ID: toULID(xmsg.ID()), 
-				Them: sess.Name,
+				ID:         toULID(xmsg.ID()),
+				Them:       sess.Name,
 				PendingAck: sess.PendingAck,
 			})
 			if err != nil {
@@ -514,7 +523,9 @@ func (c *Client) handleRatchet(ctx context.Context, in OnInput) {
 		return nil
 	})
 
-	dispatch(ctx, c, err)
+	if err != nil {
+		dispatch(ctx, c, err)
+	}
 }
 
 func (c *Client) handleOther(ctx context.Context, in OnInput) {
@@ -567,4 +578,11 @@ type nilDriver struct{}
 func (nilDriver) Run(ctx context.Context) error {
 	<-ctx.Done()
 	return ctx.Err()
+}
+
+func encTime(in []byte) []byte {
+	u := ulid.ULID{}
+	copy(u[:], in)
+	_ = u.SetTime(ulid.Now())
+	return u[:]
 }

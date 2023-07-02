@@ -161,6 +161,10 @@ Message Content
 
 ## Xochimilco
 
+[![Go Reference](https://pkg.go.dev/badge/go.salty.im/ratchet.svg)](https://pkg.go.dev/go.salty.im/ratchet)
+[![Go](https://go.salty.im/ratchet/actions/workflows/go.yml/badge.svg)](https://go.salty.im/ratchet/actions/workflows/go.yml)
+[![REUSE status](https://api.reuse.software/badge/go.salty.im/ratchet)](https://api.reuse.software/info/go.salty.im/ratchet)
+
 An implementation of the [Signal Protocols][signal-docs] [X3DH][signal-x3dh] and [Double Ratchet][signal-double-ratchet].
 Plus a simple straightforward usable E2E encryption library build on top, named Xochimilco.
 

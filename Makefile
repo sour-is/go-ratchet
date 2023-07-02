@@ -72,7 +72,7 @@ simulate:
 chat-bob:
 	go build .; ./ratchet --key bob.key --state ./tmp --post chat alice@sour.is
 chat-alice:
-	go build .; ./ratchet --key alice.key --state ./tmp --post chat
+	go build .; ./ratchet --key alice.key --state ./tmp --post chat bob@sour.is
 
 offer-bob:
 	$(GORUN) offer bob@sour.is --key alice.key --state ./tmp --post
