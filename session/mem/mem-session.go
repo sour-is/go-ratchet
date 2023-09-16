@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"go.salty.im/ratchet/client"
-	"go.salty.im/ratchet/locker"
-	"go.salty.im/ratchet/math"
+	"go.sour.is/pkg/locker"
+	"go.sour.is/pkg/math"
 )
 
 type logs map[string][]any
