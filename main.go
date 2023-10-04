@@ -20,6 +20,7 @@ import (
 	diskstore "go.sour.is/ev/driver/disk-store"
 	memstore "go.sour.is/ev/driver/mem-store"
 	"go.sour.is/ev/event"
+	"go.sour.is/pkg/xdg"
 	"go.uber.org/multierr"
 	"golang.org/x/sync/errgroup"
 
@@ -29,7 +30,6 @@ import (
 	"go.salty.im/ratchet/interactive"
 	"go.salty.im/ratchet/session"
 	"go.salty.im/ratchet/ui"
-	"go.salty.im/ratchet/xdg"
 )
 
 var usage = `Ratchet Chat.
@@ -209,7 +209,7 @@ func readInput(opts opts) (msg string, err error) {
 	return strings.TrimSpace(msg), nil
 }
 
-func setupChatlog(ctx context.Context, path string) (*ev.EventStore, error) {
+func setupChatlog(ctx context.Context, path string) (*chatLog, error) {
 	// setup eventstore
 	err := multierr.Combine(
 		ev.Init(ctx),
@@ -221,9 +221,15 @@ func setupChatlog(ctx context.Context, path string) (*ev.EventStore, error) {
 		return nil, err
 	}
 
-	return ev.Open(
+	es, err := ev.Open(
 		ctx,
 		path,
 		streamer.New(ctx),
 	)
+
+	return &chatLog{es}, err
+}
+
+type chatLog struct {
+	ev *ev.EventStore
 }

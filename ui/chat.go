@@ -120,6 +120,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		client.OnReceived,
 		error:
 		fmt.Fprintln(m.content, formatMsg(me, msg))
+		m.viewport.GotoBottom()
 
 	case tea.KeyMsg:
 		switch msg.Type {

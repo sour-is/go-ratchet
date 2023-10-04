@@ -14,7 +14,7 @@ import (
 	"github.com/keys-pub/keys"
 	"github.com/oklog/ulid/v2"
 	"go.mills.io/salty"
-	"go.salty.im/ratchet/locker"
+	"go.sour.is/pkg/locker"
 	"go.salty.im/ratchet/session"
 	"go.salty.im/ratchet/xochimilco"
 	"go.salty.im/saltyim"
