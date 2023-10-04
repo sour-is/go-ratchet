@@ -12,13 +12,14 @@ import (
 	"os/signal"
 	"strings"
 
+	"go.sour.is/ev/driver/streamer"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/docopt/docopt-go"
-	"github.com/sour-is/ev"
-	diskstore "github.com/sour-is/ev/pkg/es/driver/disk-store"
-	memstore "github.com/sour-is/ev/pkg/es/driver/mem-store"
-	"github.com/sour-is/ev/pkg/es/driver/streamer"
-	"github.com/sour-is/ev/pkg/es/event"
+	"go.sour.is/ev"
+	diskstore "go.sour.is/ev/driver/disk-store"
+	memstore "go.sour.is/ev/driver/mem-store"
+	"go.sour.is/ev/event"
 	"go.uber.org/multierr"
 	"golang.org/x/sync/errgroup"
 
