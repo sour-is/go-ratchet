@@ -43,8 +43,8 @@ Args:
   <them>             Receiver acct name to use in offer.
 
 Options:
-  --key <key>        Sender private key [default: ` + xdg.Get(xdg.EnvConfigHome, "racthet/$USER.key") + `]
-  --state <state>    Session state path [default: ` + xdg.Get(xdg.EnvStateHome, "racthet") + `]
+  --key <key>        Sender private key [default: ` + xdg.Get(xdg.EnvConfigHome, "ratchet/$USER.key") + `]
+  --state <state>    Session state path [default: ` + xdg.Get(xdg.EnvStateHome, "ratchet") + `]
   --log <logs>       Log storage path   [default: ` + xdg.Get(xdg.EnvDataHome, "ratchet") + `]
   --msg <msg>        Msg to read in.    [default to read Standard Input]
   --msg-file <file>  File to read input from.
