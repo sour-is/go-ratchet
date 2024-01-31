@@ -1,6 +1,5 @@
 // SPDX-FileCopyrightText: 2023 Jon Lundy <jon@xuu.cc>
 // SPDX-License-Identifier: BSD-3-Clause
-
 package ui
 
 import (
